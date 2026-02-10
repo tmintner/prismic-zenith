@@ -1,3 +1,0 @@
-./collector.go
-./logs_darwin.go
-./metrics_darwin.go
