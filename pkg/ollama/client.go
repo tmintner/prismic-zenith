@@ -79,30 +79,15 @@ func (c *Client) generate(prompt string) (string, error) {
 }
 
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
-	prompt := fmt.Sprintf("You are an expert SQL assistant for Zenith, a macOS monitoring agent. "+
-		"Generate ONLY a valid SQLite query. DO NOT include explanation or markdown.\n\n"+
-		"Schema:\n"+
-		"- Table 'system_logs' has columns: [timestamp, process, subsystem, category, level, message]\n"+
-		"  WARNING: system_logs does NOT have cpu_usage_pct, memory_used_mb, or memory_free_mb.\n"+
-		"- Table 'system_metrics' has columns: [timestamp, cpu_usage_pct, memory_used_mb, memory_free_mb]\n"+
-		"  WARNING: system_metrics does NOT have process, subsystem, category, level, or message.\n"+
-		"- Table 'process_metrics' has columns: [timestamp, pid, process_name, cpu_pct, memory_mb]\n"+
-		"  This table contains per-process CPU and memory usage data.\n\n"+
-		"Rules:\n"+
-		"- ONLY use columns that exist in the specified table.\n"+
-		"- Memory and CPU data ONLY exists in 'system_metrics'. Process names ONLY exist in 'system_logs'.\n"+
-		"- For per-process metrics, use 'process_metrics' table.\n"+
-		"- ALWAYS use table aliases (system_logs AS l, system_metrics AS m, process_metrics AS p).\n"+
-		"- ALWAYS qualify EVERY column with its alias (l.timestamp, m.cpu_usage_pct, p.process_name).\n"+
-		"- DO NOT join with 'system_logs' unless the query explicitly asks for logs or specific processes.\n"+
-		"- For average metrics, use a simple query like 'SELECT AVG(m.cpu_usage_pct) FROM system_metrics AS m'.\n"+
-		"- DO NOT use '*' in aggregate functions (use AVG(m.cpu_usage_pct), NOT AVG(*)).\n"+
-		"- DO NOT use non-SQLite functions like DATE_TRUNC, TIMESTAMP, DATE_PART, or INTERVAL.\n"+
-		"- Use datetime(timestamp) or strftime() for date manipulations.\n"+
-		"- Standard keyword uppercase (SELECT, FROM, JOIN, WHERE).\n"+
-		"- Valid SQLite syntax (e.g., m.timestamp >= datetime('now', '-1 hour')).\n\n"+
+	prompt := fmt.Sprintf("You are Zenith, an AI expert in system performance. "+
+		"You have access to two databases:\n"+
+		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'.\n"+
+		"2. VictoriaLogs (Logs): Query using LogsQL. Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
+		"Based on the user query, provide ONLY the database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
+		"Example MetricsQL: `avg(cpu_usage_pct)`, `max(process_memory_mb) by (process_name)`\n"+
+		"Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
 		"Query: %s\n\n"+
-		"SQL:", userQuery)
+		"Response:", userQuery)
 
 	resp, err := c.generate(prompt)
 	if err != nil {

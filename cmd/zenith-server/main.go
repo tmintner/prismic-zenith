@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"zenith/pkg/collector"
+	"zenith/pkg/config"
 	"zenith/pkg/db"
 	"zenith/pkg/gemini"
 	"zenith/pkg/llm"
@@ -35,43 +36,57 @@ type QueryResponse struct {
 var DefaultAPIKey string
 
 func main() {
-	port := flag.Int("port", 8080, "HTTP server port")
-	collectInterval := flag.String("interval", "5m", "Collection interval (e.g., 5m, 1h)")
-	metricsURL := flag.String("metrics-url", "http://localhost:8428", "VictoriaMetrics URL")
-	logsURL := flag.String("logs-url", "http://localhost:9428", "VictoriaLogs URL")
+	// Load config first
+	cfg, err := config.LoadConfig("config.json")
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	port := flag.Int("port", cfg.ServerPort, "HTTP server port")
+	collectInterval := flag.String("interval", cfg.CollectInterval, "Collection interval (e.g., 5m, 1h)")
+	metricsURL := flag.String("metrics-url", fmt.Sprintf("http://localhost:%d", cfg.MetricsPort), "VictoriaMetrics URL")
+	logsURL := flag.String("logs-url", fmt.Sprintf("http://localhost:%d", cfg.LogsPort), "VictoriaLogs URL")
+
 	// Default paths based on OS
-	defaultMetricsBin := "/opt/homebrew/bin/victoria-metrics"
-	defaultLogsBin := "/opt/homebrew/bin/victoria-logs"
+	defaultMetricsBin := cfg.MetricsBin
+	defaultLogsBin := cfg.LogsBin
 	if runtime.GOOS == "windows" {
-		defaultMetricsBin = "victoria-metrics.exe"
-		defaultLogsBin = "victoria-logs.exe"
+		if !strings.HasSuffix(defaultMetricsBin, ".exe") {
+			defaultMetricsBin = "victoria-metrics.exe"
+		}
+		if !strings.HasSuffix(defaultLogsBin, ".exe") {
+			defaultLogsBin = "victoria-logs.exe"
+		}
 	}
 
 	metricsBin := flag.String("metrics-bin", defaultMetricsBin, "Path to victoria-metrics binary")
 	logsBin := flag.String("logs-bin", defaultLogsBin, "Path to victoria-logs binary")
-	metricsData := flag.String("metrics-data", "./vm-data", "Path to VictoriaMetrics data")
-	logsData := flag.String("logs-data", "./vlogs-data", "Path to VictoriaLogs data")
+	metricsData := flag.String("metrics-data", cfg.MetricsData, "Path to VictoriaMetrics data")
+	logsData := flag.String("logs-data", cfg.LogsData, "Path to VictoriaLogs data")
 
 	envKey := os.Getenv("GEMINI_API_KEY")
 	defaultKey := envKey
 	if defaultKey == "" {
-		defaultKey = DefaultAPIKey
+		defaultKey = cfg.GeminiAPIKey
+		if defaultKey == "" {
+			defaultKey = DefaultAPIKey
+		}
 	}
 
-	provider := flag.String("provider", "gemini", "LLM Provider (gemini, ollama)")
-	modelName := flag.String("model", "", "Model name for local provider (default: gemma2:2b)")
+	provider := flag.String("provider", cfg.LLMProvider, "LLM Provider (gemini, ollama)")
+	modelName := flag.String("model", cfg.OllamaModel, "Model name for local provider")
 	apiKey := flag.String("key", defaultKey, "Gemini API Key")
 	flag.Parse()
 
 	if *provider == "gemini" && *apiKey == "" {
-		log.Fatal("Gemini API key is required (via -key, GEMINI_API_KEY env, or embedded DefaultAPIKey)")
+		log.Fatal("Gemini API key is required")
 	}
 
 	// Start VictoriaMetrics and VictoriaLogs
-	metricsCmd := startProcess(*metricsBin, "-storageDataPath", *metricsData, "-httpListenAddr", ":8428")
+	metricsCmd := startProcess(*metricsBin, "-storageDataPath", *metricsData, "-httpListenAddr", fmt.Sprintf(":%d", cfg.MetricsPort))
 	defer stopProcess(metricsCmd)
 
-	logsCmd := startProcess(*logsBin, "-storageDataPath", *logsData, "-httpListenAddr", ":9428")
+	logsCmd := startProcess(*logsBin, "-storageDataPath", *logsData, "-httpListenAddr", fmt.Sprintf(":%d", cfg.LogsPort))
 	defer stopProcess(logsCmd)
 
 	// Wait a moment for databases to start
@@ -95,12 +110,9 @@ func main() {
 		llmProvider = client
 		log.Println("Using Gemini Provider")
 	case "ollama":
-		model := *modelName
-		if model == "" {
-			model = "gemma2:2b"
-		}
-		llmProvider = ollama.NewClient("http://localhost:11434", model)
-		log.Printf("Using Ollama Provider (Model: %s)", model)
+		ollamaURL := fmt.Sprintf("http://localhost:%d", cfg.OllamaPort)
+		llmProvider = ollama.NewClient(ollamaURL, *modelName)
+		log.Printf("Using Ollama Provider at %s (Model: %s)", ollamaURL, *modelName)
 	default:
 		log.Fatalf("Unknown provider: %s", *provider)
 	}
