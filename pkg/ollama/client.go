@@ -81,7 +81,7 @@ func (c *Client) generate(prompt string) (string, error) {
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	prompt := fmt.Sprintf("You are Zenith, an AI expert in system performance. "+
 		"You have access to two databases:\n"+
-		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'.\n"+
+		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb', 'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'.\n"+
 		"2. VictoriaLogs (Logs): Query using LogsQL. Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
 		"Based on the user query, provide ONLY the database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
 		"Rules for Process Names:\n"+

@@ -29,7 +29,8 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 		Parts: []genai.Part{
 			genai.Text("You are Zenith, an AI agent focused on system analysis. " +
 				"You have access to two databases:\n" +
-				"1. VictoriaMetrics (Metrics): 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'. " +
+				"1. VictoriaMetrics (Metrics): 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb', " +
+				"'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'. " +
 				"Query this using MetricsQL (PromQL-compatible).\n" +
 				"2. VictoriaLogs (Logs): Contains system logs with fields like 'processName', 'subsystem', 'category', 'messageType', 'eventMessage'. " +
 				"Query this using LogsQL.\n\n" +
@@ -53,7 +54,12 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- memory_used_mb (labels: host)\n"+
 		"- memory_free_mb (labels: host)\n"+
 		"- process_cpu_pct (labels: pid, process_name)\n"+
-		"- process_memory_mb (labels: pid, process_name)\n\n"+
+		"- process_memory_mb (labels: pid, process_name)\n"+
+		"- srum_network_bytes_sent_total (labels: interface_luid)\n"+
+		"- srum_network_bytes_received_total (labels: interface_luid)\n"+
+		"- srum_app_cycle_time_total (labels: app_name)\n"+
+		"- srum_app_bytes_read_total (labels: app_name)\n"+
+		"- srum_app_bytes_written_total (labels: app_name)\n\n"+
 		"Logs (VictoriaLogs - LogsQL):\n"+
 		"- Available fields: processName, subsystem, category, messageType, eventMessage\n"+
 		"- Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
