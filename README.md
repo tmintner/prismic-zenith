@@ -7,8 +7,8 @@ Zenith is a cross-platform AI agent that monitors your system (macOS/Windows) an
 - **Background Service**: Automatically collects system logs and metrics every 5 minutes (configurable).
 - **Cross-Platform**:
     - **macOS**: Unified Logging (`log show`) and `top`.
-    - **Windows**: Event Logs (`Get-WinEvent`) and Performance Counters (`typeperf`).
-- **AI Analysis**: Uses Google Gemini to translate your questions into MetricsQL (PromQL) queries against VictoriaMetrics.
+    - **Windows**: Event Logs (`Get-WinEvent`), Performance Counters (`typeperf`), and **SRUM (System Resource Usage Monitor)** historical data.
+- **AI Analysis**: Uses Google Gemini or Ollama to translate your questions into MetricsQL (PromQL) queries against VictoriaMetrics.
 - **High Performance**: Uses VictoriaMetrics for scalable, efficient storage of time-series data and system metrics.
 
 ## Components
@@ -78,6 +78,11 @@ Ask questions about your system status.
 ./zenith-cli "What is the average CPU usage?"
 ```
 
+**SRUM Examples (Windows):**
+- "Which application has used the most network bytes historically?"
+- "Show me CPU cycle time history for Chrome from the SRUM database."
+- "What applications have high disk read/write bytes according to SRUM?"
+
 ## Metrics Schema
 
 Data is stored in VictoriaMetrics. Available metrics include:
@@ -87,3 +92,9 @@ Data is stored in VictoriaMetrics. Available metrics include:
 -   `memory_free_mb`: System memory free in MB.
 -   `process_cpu_pct`: Per-process CPU usage (labels: `pid`, `process_name`).
 -   `process_memory_mb`: Per-process memory usage in MB (labels: `pid`, `process_name`).
+-   `srum_network_bytes_sent_total`: Total network bytes sent (labels: `interface_luid`).
+-   `srum_network_bytes_received_total`: Total network bytes received (labels: `interface_luid`).
+-   `srum_app_cycle_time_total`: Historical CPU cycle time per application (labels: `app_name`).
+-   `srum_app_bytes_read_total`: Historical disk bytes read per application (labels: `app_name`).
+-   `srum_app_bytes_written_total`: Historical disk bytes written per application (labels: `app_name`).
+-   `srum_extensions_count`: Number of active SRUM extensions.
