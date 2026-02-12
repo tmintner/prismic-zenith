@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -48,10 +47,8 @@ func main() {
 		log.Fatal("Gemini API key is required (via -key, GEMINI_API_KEY env, or embedded DefaultAPIKey)")
 	}
 
-	database, err := db.InitDB("zenith.db")
-	if err != nil {
-		log.Fatalf("failed to init db: %v", err)
-	}
+	database := db.NewVictoriaDB("http://localhost:8428")
+	log.Println("Using VictoriaMetrics at http://localhost:8428")
 
 	// Initialize LLM Provider
 	var llmProvider llm.Provider
@@ -88,7 +85,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
 
-func startScheduler(database *db.Database, intervalStr string) {
+func startScheduler(database *db.VictoriaDB, intervalStr string) {
 	interval, err := time.ParseDuration(intervalStr)
 	if err != nil {
 		log.Printf("Invalid interval format '%s', defaulting to 5m: %v", intervalStr, err)
@@ -108,7 +105,7 @@ func startScheduler(database *db.Database, intervalStr string) {
 	}
 }
 
-func runCollection(database *db.Database, duration string) {
+func runCollection(database *db.VictoriaDB, duration string) {
 	if err := collector.CollectLogs(database, duration); err != nil {
 		log.Printf("Error collecting logs: %v", err)
 	}
@@ -121,7 +118,7 @@ func runCollection(database *db.Database, duration string) {
 	log.Println("Finished collection.")
 }
 
-func handleQuery(w http.ResponseWriter, r *http.Request, database *db.Database, client llm.Provider) {
+func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB, client llm.Provider) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -136,7 +133,7 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.Database, 
 	log.Printf("Analyzing query: %s", req.Query)
 
 	var sqlQuery string
-	var rows *sql.Rows
+	var results string
 	var err error
 
 	// Retry loop for SQL generation and execution (up to 3 attempts)
@@ -144,34 +141,27 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.Database, 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		sqlQuery, err = client.GenerateSQL(req.Query)
 		if err != nil {
-			log.Printf("Attempt %d: Failed to generate SQL: %v", attempt, err)
+			log.Printf("Attempt %d: Failed to generate MetricsQL: %v", attempt, err)
 			if attempt == maxRetries {
-				respondError(w, fmt.Sprintf("Failed to generate SQL after %d attempts: %v", maxRetries, err))
+				respondError(w, fmt.Sprintf("Failed to generate MetricsQL after %d attempts: %v", maxRetries, err))
 				return
 			}
 			continue
 		}
 
-		log.Printf("Attempt %d: Executing SQL: %s", attempt, sqlQuery)
-		rows, err = database.Conn.Query(sqlQuery)
+		log.Printf("Attempt %d: Executing Metrics Query: %s", attempt, sqlQuery)
+		results, err = database.QueryMetrics(sqlQuery)
 		if err != nil {
-			log.Printf("Attempt %d: SQL Execution Error: %v", attempt, err)
+			log.Printf("Attempt %d: Query Execution Error: %v", attempt, err)
 			if attempt == maxRetries {
-				respondError(w, fmt.Sprintf("Failed to execute SQL after %d attempts: %v", maxRetries, err))
+				respondError(w, fmt.Sprintf("Failed to execute query after %d attempts: %v", maxRetries, err))
 				return
 			}
 			continue
 		}
-		log.Printf("Attempt %d: SQL Executed successfully.", attempt)
+		log.Printf("Attempt %d: Query Executed successfully.", attempt)
 		// Success!
 		break
-	}
-	defer rows.Close()
-
-	results, err := serializeRows(rows)
-	if err != nil {
-		respondError(w, fmt.Sprintf("Failed to serialize results: %v", err))
-		return
 	}
 
 	explanation, err := client.ExplainResults(req.Query, sqlQuery, results)
@@ -182,28 +172,6 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.Database, 
 
 	log.Println("Query analysis finished.")
 	respondJSON(w, QueryResponse{Answer: explanation})
-}
-
-func serializeRows(rows *sql.Rows) (string, error) {
-	cols, err := rows.Columns()
-	if err != nil {
-		return "", err
-	}
-
-	var resultStr string
-	for rows.Next() {
-		columns := make([]interface{}, len(cols))
-		columnPointers := make([]interface{}, len(cols))
-		for i := range columns {
-			columnPointers[i] = &columns[i]
-		}
-
-		if err := rows.Scan(columnPointers...); err != nil {
-			return "", err
-		}
-		resultStr += fmt.Sprintf("%v\n", columns)
-	}
-	return resultStr, nil
 }
 
 func respondJSON(w http.ResponseWriter, resp interface{}) {

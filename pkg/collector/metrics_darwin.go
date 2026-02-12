@@ -6,11 +6,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 	"zenith/pkg/db"
 )
 
-func CollectMetrics(database *db.Database) error {
+func CollectMetrics(database *db.VictoriaDB) error {
 	// Simple performance metrics using top and vm_stat
 	// This is a simplified version; real-world collection would be more robust.
 
@@ -24,15 +23,21 @@ func CollectMetrics(database *db.Database) error {
 		return err
 	}
 
-	_, err = database.Conn.Exec(
-		"INSERT INTO system_metrics (timestamp, cpu_usage_pct, memory_used_mb, memory_free_mb) VALUES (?, ?, ?, ?)",
-		time.Now().UTC().Format("2006-01-02 15:04:05"), cpuUsage, memUsed, memFree,
-	)
+	labels := map[string]string{"host": "localhost"}
+	if err := database.InsertMetric("cpu_usage_pct", cpuUsage, labels); err != nil {
+		return err
+	}
+	if err := database.InsertMetric("memory_used_mb", memUsed, labels); err != nil {
+		return err
+	}
+	if err := database.InsertMetric("memory_free_mb", memFree, labels); err != nil {
+		return err
+	}
 
-	return err
+	return nil
 }
 
-func CollectProcessMetrics(database *db.Database) error {
+func CollectProcessMetrics(database *db.VictoriaDB) error {
 	// Use ps to get per-process CPU and memory usage
 	// ps -axo pid,comm,%cpu,rss
 	cmd := exec.Command("ps", "-axo", "pid,comm,%cpu,rss")
@@ -42,7 +47,6 @@ func CollectProcessMetrics(database *db.Database) error {
 	}
 
 	lines := strings.Split(string(output), "\n")
-	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05")
 
 	// Skip header line and parse each process
 	for i, line := range lines {
@@ -55,11 +59,7 @@ func CollectProcessMetrics(database *db.Database) error {
 			continue
 		}
 
-		pid, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
-		}
-
+		pid := fields[0]
 		processName := fields[1]
 		cpuPct, err := strconv.ParseFloat(fields[2], 64)
 		if err != nil {
@@ -73,16 +73,15 @@ func CollectProcessMetrics(database *db.Database) error {
 		}
 		memoryMB := rssKB / 1024.0
 
-		// Only store processes using significant resources (>0.1% CPU or >10MB RAM)
-		if cpuPct > 0.1 || memoryMB > 10.0 {
-			_, err = database.Conn.Exec(
-				"INSERT INTO process_metrics (timestamp, pid, process_name, cpu_pct, memory_mb) VALUES (?, ?, ?, ?, ?)",
-				timestamp, pid, processName, cpuPct, memoryMB,
-			)
-			if err != nil {
-				// Log but don't fail the entire collection
-				continue
+		// Only store processes using significant resources (>1.0% CPU or >50MB RAM)
+		// Reduced frequency/volume for VM metrics
+		if cpuPct > 1.0 || memoryMB > 50.0 {
+			labels := map[string]string{
+				"pid":          pid,
+				"process_name": processName,
 			}
+			database.InsertMetric("process_cpu_pct", cpuPct, labels)
+			database.InsertMetric("process_memory_mb", memoryMB, labels)
 		}
 	}
 

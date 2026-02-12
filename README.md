@@ -8,15 +8,21 @@ Zenith is a cross-platform AI agent that monitors your system (macOS/Windows) an
 - **Cross-Platform**:
     - **macOS**: Unified Logging (`log show`) and `top`.
     - **Windows**: Event Logs (`Get-WinEvent`) and Performance Counters (`typeperf`).
-- **AI Analysis**: Uses Google Gemini to translate your questions into SQL queries against the local database.
-- **Pure-Go SQLite**: No CGO required, making cross-compilation easy.
+- **AI Analysis**: Uses Google Gemini to translate your questions into MetricsQL (PromQL) queries against VictoriaMetrics.
+- **High Performance**: Uses VictoriaMetrics for scalable, efficient storage of time-series data and system metrics.
 
 ## Components
 
 1.  **Zenith Server (`zenith-server`)**: The core daemon that collects data and exposes an HTTP API.
 2.  **Zenith CLI (`zenith-cli`)**: A lightweight client to query the server.
+3.  **VictoriaMetrics**: Time-series database for metric storage (must be running).
 
 ## Installation
+
+### Prerequisites
+
+- **VictoriaMetrics**: Install via Homebrew: `brew install victoria-metrics`.
+- **Go 1.24+**: Required for building from source.
 
 ### Build from Source
 
@@ -30,15 +36,7 @@ go build -o zenith-server ./cmd/zenith-server
 go build -o zenith-cli ./cmd/zenith-cli
 ```
 
-### Cross-Compile for Windows (from Mac/Linux)
-
-```bash
-GOOS=windows GOARCH=amd64 go build -o zenith-server.exe ./cmd/zenith-server
-GOOS=windows GOARCH=amd64 go build -o zenith-cli.exe ./cmd/zenith-cli
-```
 ### Build with Makefile (Recommended)
-
-The easiest way to build for all platforms is using the included `Makefile`.
 
 ```bash
 # Build everything (macOS and Windows)
@@ -46,24 +44,19 @@ make all API_KEY=YOUR_SECRET_KEY
 
 # Build just for macOS
 make build-mac API_KEY=YOUR_SECRET_KEY
-
-# Build just for Windows
-make build-windows API_KEY=YOUR_SECRET_KEY
-
-# Clean up build artifacts
-make clean
 ```
 
-> [!TIP]
-> If you have `GEMINI_API_KEY` set in your environment, you can just run `make` and it will automatically pick it up.
-
-### Manual Build with Embedded API Key
-
-> [!IMPORTANT]
-> While this hides the key from your source code/Git repository, it is **NOT** perfectly safe if you distribute the binary publicly. Anyone with basic tools can extract strings from a compiled binary. If this is a private tool, this method is excellent and secure.
 ## Usage
 
-### 1. Start the Server
+### 1. Start VictoriaMetrics
+
+Ensure VictoriaMetrics is running locally:
+
+```bash
+victoria-metrics -storageDataPath ./vm-data -httpListenAddr :8428
+```
+
+### 2. Start the Server
 
 Run the server to start data collection. It needs your Gemini API key.
 
@@ -77,20 +70,20 @@ export GEMINI_API_KEY="your-api-key"
 -   `-interval`: Collection interval (e.g., `10m`, `1h`) (default `5m`).
 -   `-key`: Gemini API Key (if not set via environment variable).
 
-### 2. Query with the CLI
+### 3. Query with the CLI
 
 Ask questions about your system status.
 
 ```bash
-./zenith-cli "What errors occurred in the last hour?"
+./zenith-cli "What is the average CPU usage?"
 ```
 
-**Options:**
--   `-server`: Address of the Zenith Server (default `http://localhost:8080`).
+## Metrics Schema
 
-## Database Schema
+Data is stored in VictoriaMetrics. Available metrics include:
 
-Data is stored in `zenith.db` in the working directory of the server.
-
--   **`system_logs`**: Capture of system events (timestamp, process, level, message).
--   **`system_metrics`**: Snapshots of CPU usage and memory stats.
+-   `cpu_usage_pct`: Overall system CPU usage.
+-   `memory_used_mb`: System memory used in MB.
+-   `memory_free_mb`: System memory free in MB.
+-   `process_cpu_pct`: Per-process CPU usage (labels: `pid`, `process_name`).
+-   `process_memory_mb`: Per-process memory usage in MB (labels: `pid`, `process_name`).

@@ -13,6 +13,6 @@ type LogEntry struct {
 }
 
 type Collector interface {
-	CollectLogs(database *db.Database, duration string) error
-	CollectMetrics(database *db.Database) error
+	CollectLogs(database *db.VictoriaDB, duration string) error
+	CollectMetrics(database *db.VictoriaDB) error
 }

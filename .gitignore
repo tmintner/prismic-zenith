@@ -1,4 +1,6 @@
 # Ignore build output
 bin/
+.gocache/
+.gotmp/
 cache/
 zenith.db

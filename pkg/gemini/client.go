@@ -28,8 +28,8 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{
 			genai.Text("You are Zenith, an AI agent focused on macOS system analysis. " +
-				"You have access to SQLite tables: 'system_logs', 'system_metrics', and 'process_metrics'. " +
-				"Your goal is to translate natural language questions into SQL queries, " +
+				"You have access to VictoriaMetrics metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'. " +
+				"Your goal is to translate natural language questions into MetricsQL (PromQL-compatible) queries, " +
 				"execute them, and explain the results. " +
 				"Be extremely concise, focus on the data, and avoid conversational filler."),
 		},
@@ -43,11 +43,17 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 }
 
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
-	prompt := fmt.Sprintf("Based on the following user query, provide ONLY a SQLite SQL query to retrieve the relevant data. "+
-		"Tables: \n"+
-		"- system_logs (timestamp, process, subsystem, category, level, message)\n"+
-		"- system_metrics (timestamp, cpu_usage_pct, memory_used_mb, memory_free_mb)\n\n"+
-		"Query: %s\n\nSQL:", userQuery)
+	prompt := fmt.Sprintf("Based on the following user query, provide ONLY a MetricsQL (PromQL) query to retrieve the relevant data. "+
+		"Metrics: \n"+
+		"- cpu_usage_pct (labels: host)\n"+
+		"- memory_used_mb (labels: host)\n"+
+		"- memory_free_mb (labels: host)\n"+
+		"- process_cpu_pct (labels: pid, process_name)\n"+
+		"- process_memory_mb (labels: pid, process_name)\n\n"+
+		"Example queries:\n"+
+		"- Average CPU usage: avg(cpu_usage_pct)\n"+
+		"- Max memory used by process: max(process_memory_mb) by (process_name)\n\n"+
+		"Query: %s\n\nMetricsQL:", userQuery)
 
 	resp, err := c.Model.GenerateContent(c.Ctx, genai.Text(prompt))
 	if err != nil {

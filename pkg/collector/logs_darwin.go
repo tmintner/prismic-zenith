@@ -9,7 +9,7 @@ import (
 	"zenith/pkg/db"
 )
 
-func CollectLogs(database *db.Database, duration string) error {
+func CollectLogs(database *db.VictoriaDB, duration string) error {
 	cmd := exec.Command("log", "show", "--last", duration, "--style", "json", "--info")
 	output, err := cmd.Output()
 	if err != nil {
@@ -22,11 +22,7 @@ func CollectLogs(database *db.Database, duration string) error {
 	}
 
 	for _, entry := range logs {
-		_, err := database.Conn.Exec(
-			"INSERT INTO system_logs (timestamp, process, subsystem, category, level, message) VALUES (?, ?, ?, ?, ?, ?)",
-			entry.Timestamp, entry.ProcessName, entry.Subsystem, entry.Category, entry.LogLevel, entry.EventMessage,
-		)
-		if err != nil {
+		if err := database.InsertLog(entry); err != nil {
 			return fmt.Errorf("failed to insert log: %v", err)
 		}
 	}
