@@ -5,3 +5,5 @@ bin/
 cache/
 zenith.db
 vm-data/
+vlogs-data/
+zenith-server

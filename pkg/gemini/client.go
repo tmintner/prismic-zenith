@@ -24,13 +24,17 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 
 	model := client.GenerativeModel("gemini-3-flash-preview")
 
-	// System instruction to act as a macOS system analyst
+	// System instruction to act as a system analyst
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{
-			genai.Text("You are Zenith, an AI agent focused on macOS system analysis. " +
-				"You have access to VictoriaMetrics metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'. " +
-				"Your goal is to translate natural language questions into MetricsQL (PromQL-compatible) queries, " +
-				"execute them, and explain the results. " +
+			genai.Text("You are Zenith, an AI agent focused on system analysis. " +
+				"You have access to two databases:\n" +
+				"1. VictoriaMetrics (Metrics): 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'. " +
+				"Query this using MetricsQL (PromQL-compatible).\n" +
+				"2. VictoriaLogs (Logs): Contains system logs with fields like 'processName', 'subsystem', 'category', 'messageType', 'eventMessage'. " +
+				"Query this using LogsQL.\n\n" +
+				"Your goal is to translate natural language questions into the appropriate query, " +
+				"prefixed with either 'METRIC:' or 'LOG:'. " +
 				"Be extremely concise, focus on the data, and avoid conversational filler."),
 		},
 	}
@@ -43,17 +47,17 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 }
 
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
-	prompt := fmt.Sprintf("Based on the following user query, provide ONLY a MetricsQL (PromQL) query to retrieve the relevant data. "+
-		"Metrics: \n"+
+	prompt := fmt.Sprintf("Based on the following user query, provide ONLY the database query prefixed with 'METRIC:' or 'LOG:'.\n\n"+
+		"Metrics (VictoriaMetrics - MetricsQL):\n"+
 		"- cpu_usage_pct (labels: host)\n"+
 		"- memory_used_mb (labels: host)\n"+
 		"- memory_free_mb (labels: host)\n"+
 		"- process_cpu_pct (labels: pid, process_name)\n"+
 		"- process_memory_mb (labels: pid, process_name)\n\n"+
-		"Example queries:\n"+
-		"- Average CPU usage: avg(cpu_usage_pct)\n"+
-		"- Max memory used by process: max(process_memory_mb) by (process_name)\n\n"+
-		"Query: %s\n\nMetricsQL:", userQuery)
+		"Logs (VictoriaLogs - LogsQL):\n"+
+		"- Available fields: processName, subsystem, category, messageType, eventMessage\n"+
+		"- Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
+		"Query: %s\n\nResponse:", userQuery)
 
 	resp, err := c.Model.GenerateContent(c.Ctx, genai.Text(prompt))
 	if err != nil {

@@ -16,15 +16,13 @@ func CollectLogs(database *db.VictoriaDB, duration string) error {
 		return fmt.Errorf("failed to run log show: %v", err)
 	}
 
-	var logs []LogEntry
+	var logs []db.LogEntry
 	if err := json.Unmarshal(output, &logs); err != nil {
 		return fmt.Errorf("failed to unmarshal logs: %v", err)
 	}
 
-	for _, entry := range logs {
-		if err := database.InsertLog(entry); err != nil {
-			return fmt.Errorf("failed to insert log: %v", err)
-		}
+	if err := database.InsertLogs(logs); err != nil {
+		return fmt.Errorf("failed to insert logs: %v", err)
 	}
 
 	return nil

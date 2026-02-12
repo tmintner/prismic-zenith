@@ -57,17 +57,20 @@ func CollectLogs(database *db.VictoriaDB, duration string) error {
 		}
 	}
 
+	var entries []db.LogEntry
 	for _, event := range events {
-		entry := LogEntry{
+		entry := db.LogEntry{
 			Timestamp:    event.TimeCreated,
 			ProcessName:  event.ProviderName,
 			Category:     fmt.Sprintf("ID: %d", event.Id),
 			LogLevel:     event.LevelDisplayName,
 			EventMessage: event.Message,
 		}
-		if err := database.InsertLog(entry); err != nil {
-			return fmt.Errorf("failed to insert Windows log: %v", err)
-		}
+		entries = append(entries, entry)
+	}
+
+	if err := database.InsertLogs(entries); err != nil {
+		return fmt.Errorf("failed to insert Windows logs: %v", err)
 	}
 
 	return nil

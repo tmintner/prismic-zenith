@@ -10,14 +10,26 @@ import (
 	"time"
 )
 
+type LogEntry struct {
+	Timestamp    string `json:"timestamp"`
+	ProcessID    int    `json:"processID"`
+	ProcessName  string `json:"processName"`
+	Subsystem    string `json:"subsystem"`
+	Category     string `json:"category"`
+	LogLevel     string `json:"messageType"`
+	EventMessage string `json:"eventMessage"`
+}
+
 type VictoriaDB struct {
 	MetricsURL string
+	LogsURL    string
 	Client     *http.Client
 }
 
-func NewVictoriaDB(metricsURL string) *VictoriaDB {
+func NewVictoriaDB(metricsURL, logsURL string) *VictoriaDB {
 	return &VictoriaDB{
 		MetricsURL: metricsURL,
+		LogsURL:    logsURL,
 		Client:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -89,12 +101,95 @@ func (v *VictoriaDB) QueryMetrics(query string) (string, error) {
 	return out.String(), nil
 }
 
-// TODO: VictoriaLogs implementation if available
+// InsertLog inserts a log entry into VictoriaLogs.
 func (v *VictoriaDB) InsertLog(entry interface{}) error {
-	// For now, we might skip or use a simple metrics-based log counter if VictoriaLogs is missing
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+
+	// VictoriaLogs endpoint for JSON line insertion
+	resp, err := v.Client.Post(v.LogsURL+"/insert/jsonline", "application/json", bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("victoria logs write failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// InsertLogs inserts multiple log entries into VictoriaLogs in a single batch.
+func (v *VictoriaDB) InsertLogs(entries []LogEntry) error {
+	var buf bytes.Buffer
+	for _, entry := range entries {
+		data, err := json.Marshal(entry)
+		if err != nil {
+			return err
+		}
+		buf.Write(data)
+		buf.WriteByte('\n')
+	}
+
+	if buf.Len() == 0 {
+		return nil
+	}
+
+	resp, err := v.Client.Post(v.LogsURL+"/insert/jsonline", "application/json", &buf)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("victoria logs batch write failed (%d): %s", resp.StatusCode, string(body))
+	}
+
 	return nil
 }
 
 func (v *VictoriaDB) QueryLogs(query string) (string, error) {
-	return "VictoriaLogs is not yet configured.", nil
+	u, err := url.Parse(v.LogsURL + "/select/logsql/query")
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("query", query)
+	u.RawQuery = q.Encode()
+
+	resp, err := v.Client.Get(u.String())
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("victoria logs query failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	// VictoriaLogs returns NDJSON. We'll read it line by line and format for LLM.
+	var out bytes.Buffer
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var logEntry map[string]interface{}
+		if err := decoder.Decode(&logEntry); err == io.EOF {
+			break
+		} else if err != nil {
+			return "", err
+		}
+
+		// Format entry for LLM context
+		entryStr, _ := json.Marshal(logEntry)
+		out.Write(entryStr)
+		out.WriteByte('\n')
+	}
+
+	return out.String(), nil
 }
