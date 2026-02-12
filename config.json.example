@@ -1,0 +1,14 @@
+{
+    "server_port": 8080,
+    "metrics_port": 8428,
+    "logs_port": 9428,
+    "ollama_port": 11434,
+    "metrics_bin": "/opt/homebrew/bin/victoria-metrics",
+    "logs_bin": "/opt/homebrew/bin/victoria-logs",
+    "metrics_data": "./vm-data",
+    "logs_data": "./vlogs-data",
+    "llm_provider": "gemini",
+    "ollama_model": "phi4-mini",
+    "collect_interval": "5m",
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
+}

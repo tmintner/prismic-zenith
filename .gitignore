@@ -7,3 +7,13 @@ zenith.db
 vm-data/
 vlogs-data/
 zenith-server
+
+# Local configurations
+config.json
+
+# Logs
+*.log
+
+# Temp data
+*.csv
+.DS_Store
