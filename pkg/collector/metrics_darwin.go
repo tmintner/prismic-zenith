@@ -4,6 +4,7 @@ package collector
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"zenith/pkg/db"
@@ -38,9 +39,10 @@ func CollectMetrics(database *db.VictoriaDB) error {
 }
 
 func CollectProcessMetrics(database *db.VictoriaDB) error {
-	// Use ps to get per-process CPU and memory usage
-	// ps -axo pid,comm,%cpu,rss
-	cmd := exec.Command("ps", "-axo", "pid,comm,%cpu,rss")
+	// Use ps to get per-process CPU and memory usage.
+	// We put comm at the end so it can contain spaces.
+	// ps -axo pid,rss,%cpu,comm
+	cmd := exec.Command("ps", "-axo", "pid,rss,%cpu,comm")
 	output, err := cmd.Output()
 	if err != nil {
 		return err
@@ -54,27 +56,33 @@ func CollectProcessMetrics(database *db.VictoriaDB) error {
 			continue
 		}
 
+		// Parse from the left for fixed fields
 		fields := strings.Fields(line)
 		if len(fields) < 4 {
 			continue
 		}
 
 		pid := fields[0]
-		processName := fields[1]
+		rssKB, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
 		cpuPct, err := strconv.ParseFloat(fields[2], 64)
 		if err != nil {
 			continue
 		}
 
-		// RSS is in KB on macOS, convert to MB
-		rssKB, err := strconv.ParseFloat(fields[3], 64)
-		if err != nil {
-			continue
-		}
+		// The rest of the line is the command (comm)
+		// We re-extract it to handle spaces properly
+		idIdx := strings.Index(line, fields[0])
+		rssIdx := strings.Index(line[idIdx+len(fields[0]):], fields[1]) + idIdx + len(fields[0])
+		cpuIdx := strings.Index(line[rssIdx+len(fields[1]):], fields[2]) + rssIdx + len(fields[1])
+		comm := strings.TrimSpace(line[cpuIdx+len(fields[2]):])
+
+		processName := filepath.Base(comm)
 		memoryMB := rssKB / 1024.0
 
 		// Only store processes using significant resources (>1.0% CPU or >50MB RAM)
-		// Reduced frequency/volume for VM metrics
 		if cpuPct > 1.0 || memoryMB > 50.0 {
 			labels := map[string]string{
 				"pid":          pid,

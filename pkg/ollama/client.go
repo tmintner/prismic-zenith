@@ -84,7 +84,10 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb'.\n"+
 		"2. VictoriaLogs (Logs): Query using LogsQL. Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
 		"Based on the user query, provide ONLY the database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
-		"Example MetricsQL: `avg(cpu_usage_pct)`, `max(process_memory_mb) by (process_name)`\n"+
+		"Rules for Process Names:\n"+
+		"- Process names can be unpredictable (e.g., 'Ollama' vs 'ollama').\n"+
+		"- ALWAYS use case-insensitive regex for process names: `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n\n"+
+		"Example MetricsQL: `avg(cpu_usage_pct)`, `max(process_memory_mb{process_name=~\"(?i)ollama\"})` \n"+
 		"Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
 		"Query: %s\n\n"+
 		"Response:", userQuery)
