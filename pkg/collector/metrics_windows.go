@@ -8,11 +8,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 	"zenith/pkg/db"
 )
 
-func CollectMetrics(database *db.Database) error {
+func CollectMetrics(database *db.VictoriaDB) error {
 	cpuUsage, err := getWindowsCPUUsage()
 	if err != nil {
 		return err
@@ -23,12 +22,58 @@ func CollectMetrics(database *db.Database) error {
 		return err
 	}
 
-	_, err = database.Conn.Exec(
-		"INSERT INTO system_metrics (timestamp, cpu_usage_pct, memory_used_mb, memory_free_mb) VALUES (?, ?, ?, ?)",
-		time.Now().Format("2006-01-02 15:04:05"), cpuUsage, memUsed, memFree,
-	)
+	labels := map[string]string{"host": "localhost"}
+	database.InsertMetric("cpu_usage_pct", cpuUsage, labels)
+	database.InsertMetric("memory_used_mb", memUsed, labels)
+	database.InsertMetric("memory_free_mb", memFree, labels)
 
-	return err
+	return nil
+}
+
+func CollectProcessMetrics(database *db.VictoriaDB) error {
+	// Use PowerShell to get per-process memory usage.
+	// Calculating % CPU on Windows in a one-liner usually requires sampling over time,
+	// so we'll focus on WorkingSet (Memory) for now to keep collection fast.
+	cmd := exec.Command("powershell", "-Command", "Get-Process | Where-Object {$_.WorkingSet64 -gt 50MB} | Select-Object Id, ProcessName, WorkingSet64 | ConvertTo-Json")
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	if len(output) == 0 {
+		return nil
+	}
+
+	var results []struct {
+		Id           int     `json:"Id"`
+		ProcessName  string  `json:"ProcessName"`
+		WorkingSet64 float64 `json:"WorkingSet64"`
+	}
+
+	// Handle single vs array output from PowerShell
+	if output[0] == '{' {
+		var single struct {
+			Id           int     `json:"Id"`
+			ProcessName  string  `json:"ProcessName"`
+			WorkingSet64 float64 `json:"WorkingSet64"`
+		}
+		if err := json.Unmarshal(output, &single); err == nil {
+			results = append(results, single)
+		}
+	} else {
+		json.Unmarshal(output, &results)
+	}
+
+	for _, p := range results {
+		labels := map[string]string{
+			"pid":          strconv.Itoa(p.Id),
+			"process_name": p.ProcessName,
+		}
+		memoryMB := p.WorkingSet64 / (1024 * 1024)
+		database.InsertMetric("process_memory_mb", memoryMB, labels)
+	}
+
+	return nil
 }
 
 func getWindowsCPUUsage() (float64, error) {

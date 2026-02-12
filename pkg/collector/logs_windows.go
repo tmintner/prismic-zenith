@@ -20,7 +20,7 @@ type WinEvent struct {
 	ProviderName     string `json:"ProviderName"`
 }
 
-func CollectLogs(database *db.Database, duration string) error {
+func CollectLogs(database *db.VictoriaDB, duration string) error {
 	// duration format is like "5m", "1h". PowerShell needs a DateTime or similar.
 	// We'll use Get-WinEvent with a FilterHashtable for better performance.
 
@@ -58,11 +58,14 @@ func CollectLogs(database *db.Database, duration string) error {
 	}
 
 	for _, event := range events {
-		_, err := database.Conn.Exec(
-			"INSERT INTO system_logs (timestamp, process, subsystem, category, level, message) VALUES (?, ?, ?, ?, ?, ?)",
-			event.TimeCreated, event.ProviderName, "", fmt.Sprintf("ID: %d", event.Id), event.LevelDisplayName, event.Message,
-		)
-		if err != nil {
+		entry := LogEntry{
+			Timestamp:    event.TimeCreated,
+			ProcessName:  event.ProviderName,
+			Category:     fmt.Sprintf("ID: %d", event.Id),
+			LogLevel:     event.LevelDisplayName,
+			EventMessage: event.Message,
+		}
+		if err := database.InsertLog(entry); err != nil {
 			return fmt.Errorf("failed to insert Windows log: %v", err)
 		}
 	}
