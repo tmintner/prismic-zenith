@@ -4,3 +4,4 @@ bin/
 .gotmp/
 cache/
 zenith.db
+vm-data/
