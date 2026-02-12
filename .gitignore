@@ -17,3 +17,4 @@ config.json
 # Temp data
 *.csv
 .DS_Store
+mcp.json
