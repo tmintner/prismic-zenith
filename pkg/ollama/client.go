@@ -33,7 +33,7 @@ func NewClient(baseURL, model string) *Client {
 		baseURL = "http://localhost:11434"
 	}
 	if model == "" {
-		model = "gemma2:2b" // Default model
+		model = "phi4-mini" // Default model
 	}
 
 	return &Client{
