@@ -1,100 +1,123 @@
 # Zenith: AI-Powered System Monitor
 
-Zenith is a cross-platform AI agent that monitors your system (macOS/Windows) and lets you ask questions about its behavior using natural language. It runs as a background service and provides a CLI for interaction.
+Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system and allows you to ask questions about its behavior using natural language. It collects metrics and logs into a high-performance time-series backend and uses LLMs to interpret your queries.
 
 ## Features
 
-- **Background Service**: Automatically collects system logs and metrics every 5 minutes (configurable).
-- **Cross-Platform**:
-    - **macOS**: Unified Logging (`log show`) and `top`.
-    - **Windows**: Event Logs (`Get-WinEvent`), Performance Counters (`typeperf`), and **SRUM (System Resource Usage Monitor)** historical data.
-- **AI Analysis**: Uses Google Gemini or Ollama to translate your questions into MetricsQL (PromQL) queries against VictoriaMetrics.
-- **High Performance**: Uses VictoriaMetrics for scalable, efficient storage of time-series data and system metrics.
+- **Continuous Monitoring**: Automatically collects system metrics and logs at configurable intervals (default: 5 minutes).
+- **Cross-Platform Support**:
+    - **macOS**: Utilizes Unified Logging (`log show`) and `top`.
+    - **Windows**: Captures Event Logs (`Get-WinEvent`), Performance Counters (`typeperf`), and **SRUM (System Resource Usage Monitor)** historical data.
+- **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini or Ollama.
+- **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
+- **Configurable**: Fully manageable via `config.json` or environment variables.
 
 ## Components
 
-1.  **Zenith Server (`zenith-server`)**: The core daemon that collects data and exposes an HTTP API.
-2.  **Zenith CLI (`zenith-cli`)**: A lightweight client to query the server.
-3.  **VictoriaMetrics**: Time-series database for metric storage (must be running).
+1.  **Zenith Server (`zenith-server`)**: The background daemon responsible for data collection and exposing the query API.
+2.  **Zenith CLI (`zenith-cli`)**: A command-line tool to query the system state.
+3.  **VictoriaMetrics & VictoriaLogs**: The backend databases for storing system data.
 
-## Installation
+---
 
-### Prerequisites
+## Installation & Setup
 
-- **VictoriaMetrics**: Install via Homebrew: `brew install victoria-metrics`.
+### 1. Prerequisites
+
 - **Go 1.24+**: Required for building from source.
+- **VictoriaMetrics**: [Download](https://victoriametrics.com/limited-binaries/) or install via Homebrew: `brew install victoria-metrics`.
+- **VictoriaLogs**: [Download](https://docs.victoriametrics.com/victorialogs/) or install via Homebrew: `brew install victoria-logs`.
 
-### Build from Source
+### 2. Configuration
 
-You can build the binaries for your current platform:
+Create a `config.json` in the root directory. You can use `config.json.example` as a template:
 
-```bash
-# Build Server
-go build -o zenith-server ./cmd/zenith-server
-
-# Build CLI
-go build -o zenith-cli ./cmd/zenith-cli
+```json
+{
+    "server_port": 8080,
+    "metrics_port": 8428,
+    "logs_port": 9428,
+    "ollama_port": 11434,
+    "metrics_bin": "/opt/homebrew/bin/victoria-metrics",
+    "logs_bin": "/opt/homebrew/bin/victoria-logs",
+    "metrics_data": "./vm-data",
+    "logs_data": "./vlogs-data",
+    "llm_provider": "gemini",
+    "ollama_model": "phi4-mini",
+    "collect_interval": "5m",
+    "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
+}
 ```
 
-### Build with Makefile (Recommended)
+> [!TIP]
+> You can also set `GEMINI_API_KEY` as an environment variable to avoid storing it in plain text.
+
+### 3. Build from Source
+
+Using the provided Makefile is the easiest way to build for your platform:
 
 ```bash
-# Build everything (macOS and Windows)
-make all API_KEY=YOUR_SECRET_KEY
+# Build for current host platform (macOS/Windows)
+make
 
-# Build just for macOS
-make build-mac API_KEY=YOUR_SECRET_KEY
+# Build for specific platforms
+make build-mac
+make build-windows
 ```
+
+---
 
 ## Usage
 
-### 1. Start VictoriaMetrics
+### 1. Start Backends
 
-Ensure VictoriaMetrics is running locally:
+Ensure VictoriaMetrics and VictoriaLogs are running. If paths are correctly set in `config.json`, Zenith handles this, but you can also run them manually:
 
 ```bash
+# VictoriaMetrics
 victoria-metrics -storageDataPath ./vm-data -httpListenAddr :8428
+
+# VictoriaLogs
+victoria-logs -storageDataPath ./vlogs-data -httpListenAddr :9428
 ```
 
-### 2. Start the Server
-
-Run the server to start data collection. It needs your Gemini API key.
+### 2. Run Zenith Server
 
 ```bash
-export GEMINI_API_KEY="your-api-key"
-./zenith-server
+./bin/zenith-server
 ```
 
-**Options:**
--   `-port`: HTTP server port (default 8080).
--   `-interval`: Collection interval (e.g., `10m`, `1h`) (default `5m`).
--   `-key`: Gemini API Key (if not set via environment variable).
+### 3. Query via CLI
 
-### 3. Query with the CLI
-
-Ask questions about your system status.
+Use the CLI to ask questions about your system.
 
 ```bash
-./zenith-cli "What is the average CPU usage?"
+./bin/zenith-cli "What was the average CPU usage in the last hour?"
 ```
 
-**SRUM Examples (Windows):**
-- "Which application has used the most network bytes historically?"
-- "Show me CPU cycle time history for Chrome from the SRUM database."
-- "What applications have high disk read/write bytes according to SRUM?"
+#### Windows & SRUM Examples
+Zenith on Windows collects historical data from the System Resource Usage Monitor (SRUM).
 
-## Metrics Schema
+- **Network Usage**: "Which application has used the most network bytes historically?"
+- **CPU Cycles**: "Show me CPU cycle time history for Chrome."
+- **Disk I/O**: "What applications have high disk read/write bytes according to SRUM?"
+- **Logs**: "Were there any 'Error' level events in the System log in the last 10 minutes?"
 
-Data is stored in VictoriaMetrics. Available metrics include:
+---
 
--   `cpu_usage_pct`: Overall system CPU usage.
--   `memory_used_mb`: System memory used in MB.
--   `memory_free_mb`: System memory free in MB.
--   `process_cpu_pct`: Per-process CPU usage (labels: `pid`, `process_name`).
--   `process_memory_mb`: Per-process memory usage in MB (labels: `pid`, `process_name`).
--   `srum_network_bytes_sent_total`: Total network bytes sent (labels: `interface_luid`).
--   `srum_network_bytes_received_total`: Total network bytes received (labels: `interface_luid`).
--   `srum_app_cycle_time_total`: Historical CPU cycle time per application (labels: `app_name`).
--   `srum_app_bytes_read_total`: Historical disk bytes read per application (labels: `app_name`).
--   `srum_app_bytes_written_total`: Historical disk bytes written per application (labels: `app_name`).
--   `srum_extensions_count`: Number of active SRUM extensions.
+## System Metrics & Logs
+
+### Available Metrics
+- `cpu_usage_pct`: Overall system CPU usage.
+- `memory_used_mb` / `memory_free_mb`: System memory stats.
+- `process_memory_mb`: Per-process memory usage (labels: `pid`, `process_name`).
+- `srum_network_bytes_sent_total` / `srum_network_bytes_received_total`: (Windows) Network interface stats.
+- `srum_app_cycle_time_total`: (Windows) Historical CPU cycles per app.
+- `srum_app_bytes_read_total` / `srum_app_bytes_written_total`: (Windows) Disk I/O per app.
+
+### Log Schema
+Logs are ingested into VictoriaLogs with the following fields:
+- `timestamp`: Event time.
+- `processName`: Source of the log (e.g., ProviderName on Windows).
+- `messageType`: Log level (e.g., LevelDisplayName on Windows, info/error on macOS).
+- `eventMessage`: The actual log content.
