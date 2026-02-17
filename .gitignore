@@ -1,5 +1,7 @@
 # Ignore build output
 bin/
+.gopkg/
+.gopath/
 .gocache/
 .gotmp/
 cache/
