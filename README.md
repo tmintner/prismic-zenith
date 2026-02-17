@@ -6,8 +6,8 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 
 - **Continuous Monitoring**: Automatically collects system metrics and logs at configurable intervals (default: 5 minutes).
 - **Cross-Platform Support**:
-    - **macOS**: Utilizes Unified Logging (`log show`) and `top`.
-    - **Windows**: Captures Event Logs (`Get-WinEvent`), Performance Counters (`typeperf`), and **SRUM (System Resource Usage Monitor)** historical data.
+    - **macOS**: Native Unified Logging via CGO and `top` replacement using `gopsutil`.
+    - **Windows**: Native Event Logs (`EvtQuery`) and SRUM parsing using direct ESE database access.
 - **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini or Ollama.
 - **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
 - **Configurable**: Fully manageable via `config.json` or environment variables.
@@ -25,6 +25,10 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 ### 1. Prerequisites
 
 - **Go 1.24+**: Required for building from source.
+- **CGO**: Required for macOS builds to interface with the System Log API.
+
+> [!IMPORTANT]
+> macOS builds now require `CGO_ENABLED=1` (default on native builds) to support unified logging without shell commands.
 - **VictoriaMetrics**: [Download](https://victoriametrics.com/limited-binaries/) or install via Homebrew: `brew install victoria-metrics`.
 - **VictoriaLogs**: [Download](https://docs.victoriametrics.com/victorialogs/) or install via Homebrew: `brew install victoria-logs`.
 

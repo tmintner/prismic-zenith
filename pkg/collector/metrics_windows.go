@@ -3,36 +3,41 @@
 package collector
 
 import (
-	"encoding/json"
 	"fmt"
-	"os/exec"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
-	"strings"
+	"time"
+
 	"zenith/pkg/db"
+
+	"github.com/Velocidex/ordereddict"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
+	"github.com/shirou/gopsutil/v4/net"
+	"github.com/shirou/gopsutil/v4/process"
+	"www.velocidex.com/golang/go-ese/parser"
 )
 
 func CollectMetrics(database *db.VictoriaDB) error {
-	cpuUsage, err := getWindowsCPUUsage()
-	if err != nil {
-		fmt.Printf("failed to get cpu usage: %v\n", err)
-	} else {
-		labels := map[string]string{"host": "localhost"}
-		database.InsertMetric("cpu_usage_pct", cpuUsage, labels)
+	if err := collectCPUMetrics(database); err != nil {
+		fmt.Printf("failed to collect CPU metrics: %v\n", err)
 	}
 
-	memUsed, memFree, err := getWindowsMemoryUsage()
-	if err != nil {
-		fmt.Printf("failed to get memory usage: %v\n", err)
-	} else {
-		labels := map[string]string{"host": "localhost"}
-		database.InsertMetric("memory_used_mb", memUsed, labels)
-		database.InsertMetric("memory_free_mb", memFree, labels)
+	if err := collectMemoryMetrics(database); err != nil {
+		fmt.Printf("failed to collect memory metrics: %v\n", err)
 	}
 
-	if err := CollectSrumMetrics(database); err != nil {
-		fmt.Printf("failed to collect SRUM metrics: %v\n", err)
+	if err := CollectProcessMetrics(database); err != nil {
+		fmt.Printf("failed to collect process metrics: %v\n", err)
 	}
 
+	if err := collectNetworkMetrics(database); err != nil {
+		fmt.Printf("failed to collect network metrics: %v\n", err)
+	}
+
+	// SRUM is heavy, maybe run it less frequently or just catch errors without spamming
 	if err := CollectSrumHistoricalMetrics(database); err != nil {
 		fmt.Printf("failed to collect SRUM historical metrics: %v\n", err)
 	}
@@ -40,260 +45,218 @@ func CollectMetrics(database *db.VictoriaDB) error {
 	return nil
 }
 
-func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
-	// 1. Collect Application Resource Usage via PowerShell/.NET Parser
-	err := collectSrumAppUsage(database)
+func collectCPUMetrics(database *db.VictoriaDB) error {
+	percent, err := cpu.Percent(time.Second, false)
 	if err != nil {
-		fmt.Printf("SRUM App Usage collection error: %v\n", err)
+		return err
 	}
-
-	// 2. Collect Energy History via powercfg
-	err = collectSrumEnergyHistory(database)
-	if err != nil {
-		fmt.Printf("SRUM Energy History collection error: %v\n", err)
+	if len(percent) > 0 {
+		labels := map[string]string{"host": "localhost"}
+		return database.InsertMetric("cpu_usage_pct", percent[0], labels)
 	}
-
 	return nil
 }
 
-func collectSrumAppUsage(database *db.VictoriaDB) error {
-	// Execute the specialized PowerShell parser
-	// Assuming srum_parser.ps1 is in the same directory or a known location
-	cmd := exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", "./pkg/collector/srum_parser.ps1")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to run srum_parser.ps1: %w", err)
-	}
-
-	if len(output) == 0 {
-		return nil
-	}
-
-	var results []struct {
-		AppName      string  `json:"AppName"`
-		CycleTime    float64 `json:"CycleTime"`
-		BytesRead    float64 `json:"BytesRead"`
-		BytesWritten float64 `json:"BytesWritten"`
-	}
-
-	if err := json.Unmarshal(output, &results); err != nil {
-		return fmt.Errorf("failed to unmarshal srum app usage: %w", err)
-	}
-
-	for _, res := range results {
-		if res.AppName == "" {
-			continue
-		}
-		labels := map[string]string{
-			"app_name": res.AppName,
-		}
-		database.InsertMetric("srum_app_cycle_time_total", res.CycleTime, labels)
-		database.InsertMetric("srum_app_bytes_read_total", res.BytesRead, labels)
-		database.InsertMetric("srum_app_bytes_written_total", res.BytesWritten, labels)
-	}
-
-	return nil
-}
-
-func collectSrumEnergyHistory(database *db.VictoriaDB) error {
-	// Use powercfg to get application energy usage
-	outputFile := "srum_energy.csv"
-	cmd := exec.Command("powercfg", "/srumutil", "/output", outputFile, "/CSV")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to run powercfg /srumutil: %w", err)
-	}
-
-	// Note: Parsing the full CSV might be heavy; for this implementation,
-	// we'll just log that it was captured or implement a simple parser if needed.
-	// Since we are inserting into VictoriaMetrics, we'd need to parse the CSV.
-	// For now, let's keep it simple and focus on the database parsing.
-
-	return nil
-}
-
-func CollectSrumMetrics(database *db.VictoriaDB) error {
-	// 1. Collect SRUM Registry Data (Extensions)
-	err := collectSrumRegistryData(database)
-	if err != nil {
-		fmt.Printf("SRUM Registry collection error: %v\n", err)
-	}
-
-	// 2. Collect SRUM Database Data via CIM (Network Usage)
-	// MSFT_NetNetworkUsage is one of the classes backed by SRUM data
-	err = collectSrumCimData(database)
-	if err != nil {
-		fmt.Printf("SRUM CIM collection error: %v\n", err)
-	}
-
-	return nil
-}
-
-func collectSrumRegistryData(database *db.VictoriaDB) error {
-	// Querying the registry for SRUM extensions to understand what's being monitored
-	cmd := exec.Command("powershell", "-Command", "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SRUM\\Extensions' | Select-Object Name | ConvertTo-Json")
-	output, err := cmd.Output()
+func collectMemoryMetrics(database *db.VictoriaDB) error {
+	v, err := mem.VirtualMemory()
 	if err != nil {
 		return err
 	}
 
-	if len(output) == 0 {
-		return nil
-	}
-
-	var results interface{}
-	if err := json.Unmarshal(output, &results); err != nil {
-		return err
-	}
-
-	// Count extensions as a simple metric of SRUM configuration depth
-	count := 0
-	switch v := results.(type) {
-	case []interface{}:
-		count = len(v)
-	case map[string]interface{}:
-		count = 1
-	}
-
-	labels := map[string]string{"source": "registry"}
-	database.InsertMetric("srum_extensions_count", float64(count), labels)
-	return nil
-}
-
-func collectSrumCimData(database *db.VictoriaDB) error {
-	// MSFT_NetNetworkUsage provides per-interface network usage history derived from SRUM
-	cmd := exec.Command("powershell", "-Command", "Get-CimInstance -Namespace root\\StandardCimv2 -ClassName MSFT_NetNetworkUsage | Select-Object InterfaceLuid, BytesSent, BytesReceived | ConvertTo-Json")
-	output, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-
-	if len(output) == 0 {
-		return nil
-	}
-
-	var rawResults json.RawMessage
-	if err := json.Unmarshal(output, &rawResults); err != nil {
-		return err
-	}
-
-	var results []struct {
-		InterfaceLuid uint64 `json:"InterfaceLuid"`
-		BytesSent     uint64 `json:"BytesSent"`
-		BytesReceived uint64 `json:"BytesReceived"`
-	}
-
-	if output[0] == '{' {
-		var single struct {
-			InterfaceLuid uint64 `json:"InterfaceLuid"`
-			BytesSent     uint64 `json:"BytesSent"`
-			BytesReceived uint64 `json:"BytesReceived"`
-		}
-		if err := json.Unmarshal(output, &single); err == nil {
-			results = append(results, single)
-		}
-	} else {
-		json.Unmarshal(output, &results)
-	}
-
-	for _, res := range results {
-		labels := map[string]string{
-			"interface_luid": strconv.FormatUint(res.InterfaceLuid, 10),
-		}
-		database.InsertMetric("srum_network_bytes_sent_total", float64(res.BytesSent), labels)
-		database.InsertMetric("srum_network_bytes_received_total", float64(res.BytesReceived), labels)
-	}
-
+	labels := map[string]string{"host": "localhost"}
+	database.InsertMetric("memory_used_mb", float64(v.Used)/1024/1024, labels)
+	database.InsertMetric("memory_free_mb", float64(v.Free)/1024/1024, labels)
 	return nil
 }
 
 func CollectProcessMetrics(database *db.VictoriaDB) error {
-	// Use PowerShell to get per-process memory usage.
-	// Calculating % CPU on Windows in a one-liner usually requires sampling over time,
-	// so we'll focus on WorkingSet (Memory) for now to keep collection fast.
-	cmd := exec.Command("powershell", "-Command", "Get-Process | Where-Object {$_.WorkingSet64 -gt 50MB} | Select-Object Id, ProcessName, WorkingSet64 | ConvertTo-Json")
-	output, err := cmd.Output()
+	procs, err := process.Processes()
 	if err != nil {
 		return err
 	}
 
-	if len(output) == 0 {
-		return nil
-	}
-
-	var results []struct {
-		Id           int     `json:"Id"`
-		ProcessName  string  `json:"ProcessName"`
-		WorkingSet64 float64 `json:"WorkingSet64"`
-	}
-
-	// Handle single vs array output from PowerShell
-	if output[0] == '{' {
-		var single struct {
-			Id           int     `json:"Id"`
-			ProcessName  string  `json:"ProcessName"`
-			WorkingSet64 float64 `json:"WorkingSet64"`
+	for _, p := range procs {
+		// Filter out processes with low memory usage to reduce noise
+		memInfo, err := p.MemoryInfo()
+		if err != nil || memInfo.RSS < 50*1024*1024 { // 50MB
+			continue
 		}
-		if err := json.Unmarshal(output, &single); err == nil {
-			results = append(results, single)
-		}
-	} else {
-		json.Unmarshal(output, &results)
-	}
 
-	for _, p := range results {
+		name, err := p.Name()
+		if err != nil {
+			name = "unknown"
+		}
+
 		labels := map[string]string{
-			"pid":          strconv.Itoa(p.Id),
-			"process_name": p.ProcessName,
+			"pid":          strconv.Itoa(int(p.Pid)),
+			"process_name": name,
 		}
-		memoryMB := p.WorkingSet64 / (1024 * 1024)
-		database.InsertMetric("process_memory_mb", memoryMB, labels)
+		database.InsertMetric("process_memory_mb", float64(memInfo.RSS)/1024/1024, labels)
+	}
+	return nil
+}
+
+func collectNetworkMetrics(database *db.VictoriaDB) error {
+	counters, err := net.IOCounters(true) // per interface
+	if err != nil {
+		return err
+	}
+
+	for _, c := range counters {
+		labels := map[string]string{
+			"interface": c.Name,
+		}
+		database.InsertMetric("srum_network_bytes_sent_total", float64(c.BytesSent), labels)
+		database.InsertMetric("srum_network_bytes_received_total", float64(c.BytesRecv), labels)
+	}
+	return nil
+}
+
+// SRUM Collection Implementation
+
+const (
+	srumDbPath           = "C:\\Windows\\System32\\sru\\SRUDB.dat"
+	srumIdMapTable       = "SrumIdMapTable"
+	srumAppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}"
+)
+
+func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
+	// 1. Copy SRUDB.dat to a temporary location because it's locked by the system
+	tempDir := os.TempDir()
+	destPath := filepath.Join(tempDir, "SRUDB_zenith_copy.dat")
+
+	// Ensure cleanup
+	defer os.Remove(destPath)
+
+	if err := copyFile(srumDbPath, destPath); err != nil {
+		return fmt.Errorf("failed to copy SRUDB.dat: %w", err)
+	}
+
+	// 2. Create ESE Context
+	f, err := os.Open(destPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	eseCtx, err := parser.NewESEContext(f)
+	if err != nil {
+		return fmt.Errorf("failed to create ESE context: %w", err)
+	}
+
+	// 3. Read Database Catalog
+	catalog, err := parser.ReadCatalog(eseCtx)
+	if err != nil {
+		return fmt.Errorf("failed to read ESE catalog: %w", err)
+	}
+
+	// 4. Read SrumIdMapTable: Id (Int32) -> Value (String, the App Name)
+	idMap := make(map[int32]string)
+
+	err = catalog.DumpTable(srumIdMapTable, func(row *ordereddict.Dict) error {
+		idVal, ok := getInt32FromDict(row, "Id")
+		if !ok {
+			return nil
+		}
+
+		valStr, ok := row.Get("Value")
+		if ok {
+			if s, ok := valStr.(string); ok {
+				idMap[idVal] = s
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("warning: failed to dump SrumIdMapTable: %v\n", err)
+	}
+
+	// 5. Read Application Resource Usage Table
+	// Limit processing to recent entries or just top consumers to avoid heavy load
+	count := 0
+	err = catalog.DumpTable(srumAppResourceTable, func(row *ordereddict.Dict) error {
+		count++
+		if count > 500 { // Limit for safety in this demo
+			return io.EOF // Stop iteration
+		}
+
+		// Extract fields
+		appId, _ := getInt32FromDict(row, "AppId")
+		cycleTime, _ := getInt64FromDict(row, "CycleTime")
+		bytesRead, _ := getInt64FromDict(row, "BytesRead")
+		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
+
+		appName, exists := idMap[appId]
+		if !exists || appName == "" {
+			return nil
+		}
+
+		labels := map[string]string{
+			"app_name": appName,
+		}
+
+		// These are accumulating counters in SRUM, so we just report current total
+		database.InsertMetric("srum_app_cycle_time_total", float64(cycleTime), labels)
+		database.InsertMetric("srum_app_bytes_read_total", float64(bytesRead), labels)
+		database.InsertMetric("srum_app_bytes_written_total", float64(bytesWritten), labels)
+		return nil
+	})
+
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("failed to dump usage table: %w", err)
 	}
 
 	return nil
 }
 
-func getWindowsCPUUsage() (float64, error) {
-	// typeperf "\Processor(_Total)\% Processor Time" -sc 1
-	cmd := exec.Command("typeperf", `\Processor(_Total)\% Processor Time`, "-sc", "1")
-	output, err := cmd.Output()
+// copyFile is a helper to copy a file
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
 	if err != nil {
-		return 0, err
+		return err
 	}
+	defer sourceFile.Close()
 
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if strings.Contains(line, ",") && !strings.Contains(line, "(PDH-CSV") {
-			parts := strings.Split(line, ",")
-			if len(parts) >= 2 {
-				val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-				return strconv.ParseFloat(val, 64)
-			}
-		}
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
 	}
-	return 0, fmt.Errorf("failed to parse CPU usage from typeperf")
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
 }
 
-func getWindowsMemoryUsage() (float64, float64, error) {
-	// Using systeminfo or wmic could be slow. Let's use powershell for memory.
-	cmd := exec.Command("powershell", "-Command", "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory, TotalVisibleMemorySize | ConvertTo-Json")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, 0, err
+func getInt32FromDict(m *ordereddict.Dict, key string) (int32, bool) {
+	v, ok := m.Get(key)
+	if !ok {
+		return 0, false
 	}
-
-	// Simplified parsing for brevity in this example
-	var result struct {
-		FreePhysicalMemory     float64 `json:"FreePhysicalMemory"`
-		TotalVisibleMemorySize float64 `json:"TotalVisibleMemorySize"`
+	switch t := v.(type) {
+	case int32:
+		return t, true
+	case int64:
+		return int32(t), true
+	case int:
+		return int32(t), true
+	default:
+		return 0, false
 	}
+}
 
-	if err := json.Unmarshal(output, &result); err != nil {
-		return 0, 0, err
+func getInt64FromDict(m *ordereddict.Dict, key string) (int64, bool) {
+	v, ok := m.Get(key)
+	if !ok {
+		return 0, false
 	}
-
-	freeMB := result.FreePhysicalMemory / 1024
-	totalMB := result.TotalVisibleMemorySize / 1024
-	usedMB := totalMB - freeMB
-
-	return usedMB, freeMB, nil
+	switch t := v.(type) {
+	case int64:
+		return t, true
+	case int32:
+		return int64(t), true
+	case int:
+		return int64(t), true
+	default:
+		return 0, false
+	}
 }

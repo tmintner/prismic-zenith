@@ -1,6 +1,4 @@
-//go:build darwin
-
-package collector
+package main
 
 /*
 #cgo CFLAGS: -x objective-c
@@ -18,9 +16,9 @@ typedef struct {
     double ts;
 } LogEntryC;
 
-void goLogCallback(LogEntryC entry, void* context);
+void goLogCallback(LogEntryC entry);
 
-static inline void IterateLogs(void* context, double secondsAgo) {
+static inline void IterateLogs(double secondsAgo) {
     if (@available(macOS 10.15, *)) {
         NSError *error = nil;
         OSLogStore *store = [OSLogStore storeWithScope:OSLogStoreSystem error:&error];
@@ -29,7 +27,7 @@ static inline void IterateLogs(void* context, double secondsAgo) {
         NSDate *startDate = [NSDate dateWithTimeIntervalSinceNow:-secondsAgo];
         OSLogPosition *position = [store positionWithDate:startDate];
 
-        OSLogEnumerator *enumerator = [store entriesWithOptions:0 position:position predicate:nil error:&error];
+        OSLogEnumerator *enumerator = [store entriesEnumeratorWithOptions:0 position:position predicate:nil error:&error];
         if (error) return;
 
         for (OSLogEntry *baseEntry in enumerator) {
@@ -44,7 +42,7 @@ static inline void IterateLogs(void* context, double secondsAgo) {
                 cEntry.lvl = (int)logEntry.level;
                 cEntry.ts = [logEntry.date timeIntervalSince1970];
 
-                goLogCallback(cEntry, context);
+                goLogCallback(cEntry);
             }
         }
     }
@@ -54,40 +52,20 @@ import "C"
 import (
 	"fmt"
 	"time"
-	"unsafe"
-	"zenith/pkg/db"
 )
 
 //export goLogCallback
-func goLogCallback(entry C.LogEntryC, context unsafe.Pointer) {
-	logsPtr := (*[]db.LogEntry)(context)
-
-	goEntry := db.LogEntry{
-		Timestamp:    time.Unix(int64(entry.ts), 0).Format(time.RFC3339),
-		ProcessName:  C.GoString(entry.prc),
-		Category:     C.GoString(entry.cat),
-		LogLevel:     fmt.Sprintf("%d", int(entry.lvl)),
-		EventMessage: C.GoString(entry.msg),
-	}
-
-	*logsPtr = append(*logsPtr, goEntry)
+func goLogCallback(entry C.LogEntryC) {
+	fmt.Printf("[%v] [%s] %s: %s\n",
+		time.Unix(int64(entry.ts), 0).Format(time.Kitchen),
+		C.GoString(entry.prc),
+		C.GoString(entry.cat),
+		C.GoString(entry.msg),
+	)
 }
 
-func CollectLogs(database *db.VictoriaDB, duration string) error {
-	dur, err := time.ParseDuration(duration)
-	if err != nil {
-		dur = 5 * time.Minute
-	}
-
-	var logs []db.LogEntry
-
-	C.IterateLogs(unsafe.Pointer(&logs), C.double(dur.Seconds()))
-
-	if len(logs) > 0 {
-		if err := database.InsertLogs(logs); err != nil {
-			return fmt.Errorf("failed to insert logs: %v", err)
-		}
-	}
-
-	return nil
+func main() {
+	fmt.Println("Starting Native macOS Log Collection Test (last 30 seconds)...")
+	C.IterateLogs(30.0)
+	fmt.Println("Test Finished.")
 }
