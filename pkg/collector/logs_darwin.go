@@ -2,75 +2,23 @@
 
 package collector
 
-/*
-#cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework Foundation -framework CoreServices -framework OSLog
-
-#import <Foundation/Foundation.h>
-#import <OSLog/OSLog.h>
-
-typedef struct {
-    const char* msg;
-    const char* sub;
-    const char* cat;
-    const char* prc;
-    int lvl;
-    double ts;
-} LogEntryC;
-
-void goLogCallback(LogEntryC entry, void* context);
-
-static inline void IterateLogs(void* context, double secondsAgo) {
-    if (@available(macOS 10.15, *)) {
-        NSError *error = nil;
-        OSLogStore *store = [OSLogStore storeWithScope:OSLogStoreSystem error:&error];
-        if (error) return;
-
-        NSDate *startDate = [NSDate dateWithTimeIntervalSinceNow:-secondsAgo];
-        OSLogPosition *position = [store positionWithDate:startDate];
-
-        OSLogEnumerator *enumerator = [store entriesWithOptions:0 position:position predicate:nil error:&error];
-        if (error) return;
-
-        for (OSLogEntry *baseEntry in enumerator) {
-            if ([baseEntry isKindOfClass:[OSLogEntryLog class]]) {
-                OSLogEntryLog *logEntry = (OSLogEntryLog *)baseEntry;
-
-                LogEntryC cEntry;
-                cEntry.msg = [logEntry.composedMessage UTF8String];
-                cEntry.sub = [logEntry.subsystem UTF8String];
-                cEntry.cat = [logEntry.category UTF8String];
-                cEntry.prc = [logEntry.process UTF8String];
-                cEntry.lvl = (int)logEntry.level;
-                cEntry.ts = [logEntry.date timeIntervalSince1970];
-
-                goLogCallback(cEntry, context);
-            }
-        }
-    }
-}
-*/
-import "C"
 import (
+	"encoding/json"
 	"fmt"
+	"os/exec"
 	"time"
-	"unsafe"
 	"zenith/pkg/db"
 )
 
-//export goLogCallback
-func goLogCallback(entry C.LogEntryC, context unsafe.Pointer) {
-	logsPtr := (*[]db.LogEntry)(context)
-
-	goEntry := db.LogEntry{
-		Timestamp:    time.Unix(int64(entry.ts), 0).Format(time.RFC3339),
-		ProcessName:  C.GoString(entry.prc),
-		Category:     C.GoString(entry.cat),
-		LogLevel:     fmt.Sprintf("%d", int(entry.lvl)),
-		EventMessage: C.GoString(entry.msg),
-	}
-
-	*logsPtr = append(*logsPtr, goEntry)
+// LogShowEntry represents the structure of the JSON output from `log show`
+type LogShowEntry struct {
+	Timestamp    string `json:"timestamp"`
+	ProcessID    int    `json:"processID"`
+	ProcessName  string `json:"processImagePath"`
+	Subsystem    string `json:"subsystem"`
+	Category     string `json:"category"`
+	LogLevel     int    `json:"messageType"`
+	EventMessage string `json:"eventMessage"`
 }
 
 func CollectLogs(database *db.VictoriaDB, duration string) error {
@@ -79,9 +27,39 @@ func CollectLogs(database *db.VictoriaDB, duration string) error {
 		dur = 5 * time.Minute
 	}
 
-	var logs []db.LogEntry
+	// Calculate the last N minutes/hours for `log show`
+	// `log show` uses a specific format for --last
+	lastArg := fmt.Sprintf("%ds", int(dur.Seconds()))
 
-	C.IterateLogs(unsafe.Pointer(&logs), C.double(dur.Seconds()))
+	cmd := exec.Command("log", "show", "--last", lastArg, "--style", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to run log show: %v", err)
+	}
+
+	if len(output) == 0 {
+		return nil
+	}
+
+	var rawEntries []LogShowEntry
+	if err := json.Unmarshal(output, &rawEntries); err != nil {
+		return fmt.Errorf("failed to parse log JSON: %v", err)
+	}
+
+	if len(rawEntries) == 0 {
+		return nil
+	}
+
+	var logs []db.LogEntry
+	for _, raw := range rawEntries {
+		logs = append(logs, db.LogEntry{
+			Timestamp:    raw.Timestamp,
+			ProcessName:  raw.ProcessName,
+			Category:     raw.Category,
+			LogLevel:     fmt.Sprintf("%d", raw.LogLevel),
+			EventMessage: raw.EventMessage,
+		})
+	}
 
 	if len(logs) > 0 {
 		if err := database.InsertLogs(logs); err != nil {

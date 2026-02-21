@@ -7,4 +7,7 @@ type Provider interface {
 
 	// ExplainResults explains the results of a SQL query in natural language.
 	ExplainResults(userQuery, sql, results string) (string, error)
+
+	// GenerateRecommendations analyzes recent system data and provides performance improvement recommendations.
+	GenerateRecommendations(systemData string) (string, error)
 }

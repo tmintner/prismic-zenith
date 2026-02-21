@@ -22,6 +22,7 @@ import (
 	"zenith/pkg/gemini"
 	"zenith/pkg/llm"
 	"zenith/pkg/ollama"
+	"zenith/pkg/rl"
 )
 
 type QueryRequest struct {
@@ -29,8 +30,9 @@ type QueryRequest struct {
 }
 
 type QueryResponse struct {
-	Answer string `json:"answer"`
-	Error  string `json:"error,omitempty"`
+	InteractionID int64  `json:"interaction_id,omitempty"`
+	Answer        string `json:"answer"`
+	Error         string `json:"error,omitempty"`
 }
 
 var DefaultAPIKey string
@@ -117,13 +119,26 @@ func main() {
 		log.Fatalf("Unknown provider: %s", *provider)
 	}
 
+	// Initialize RL Database
+	rlDB, err := rl.InitDB("zenith_rl.db")
+	if err != nil {
+		log.Fatalf("failed to init RL database: %v", err)
+	}
+	defer rlDB.Close()
+
 	// Start Background Collection
 	go startScheduler(database, *collectInterval)
 
 	// Start HTTP Server
 	server := &http.Server{Addr: fmt.Sprintf(":%d", *port)}
 	http.HandleFunc("/query", func(w http.ResponseWriter, r *http.Request) {
-		handleQuery(w, r, database, llmProvider)
+		handleQuery(w, r, database, llmProvider, rlDB)
+	})
+	http.HandleFunc("/recommend", func(w http.ResponseWriter, r *http.Request) {
+		handleRecommend(w, r, database, llmProvider, rlDB)
+	})
+	http.HandleFunc("/feedback", func(w http.ResponseWriter, r *http.Request) {
+		handleFeedback(w, r, rlDB)
 	})
 
 	// Handle Graceful Shutdown
@@ -226,7 +241,7 @@ func runCollection(database *db.VictoriaDB, duration string) {
 	log.Println("Finished collection.")
 }
 
-func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB, client llm.Provider) {
+func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB, client llm.Provider, rlDB *rl.DB) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -251,7 +266,8 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB
 		if err != nil {
 			log.Printf("Attempt %d: Failed to generate MetricsQL: %v", attempt, err)
 			if attempt == maxRetries {
-				respondError(w, fmt.Sprintf("Failed to generate MetricsQL after %d attempts: %v", maxRetries, err))
+				id, _ := rlDB.LogExperience("query", req.Query, "", fmt.Sprintf("Failed to generate SQL: %v", err))
+				respondError(w, fmt.Sprintf("Failed to generate MetricsQL after %d attempts: %v", maxRetries, err), id)
 				return
 			}
 			continue
@@ -270,8 +286,13 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB
 
 		if err != nil {
 			log.Printf("Attempt %d: Query Execution Error: %v", attempt, err)
+
+			// Autonomous Self-Correction Logging: Log the failed query
+			rlDB.LogExperience("query", req.Query, sqlQuery, fmt.Sprintf("Execution Error: %v", err))
+
 			if attempt == maxRetries {
-				respondError(w, fmt.Sprintf("Failed to execute query after %d attempts: %v", maxRetries, err))
+				id, _ := rlDB.LogExperience("query", req.Query, sqlQuery, fmt.Sprintf("Final Execution Error: %v", err))
+				respondError(w, fmt.Sprintf("Failed to execute query after %d attempts: %v", maxRetries, err), id)
 				return
 			}
 			continue
@@ -283,12 +304,15 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB
 
 	explanation, err := client.ExplainResults(req.Query, sqlQuery, results)
 	if err != nil {
-		respondError(w, fmt.Sprintf("Failed to explain results: %v", err))
+		id, _ := rlDB.LogExperience("query", req.Query, sqlQuery, fmt.Sprintf("Failed to explain results: %v", err))
+		respondError(w, fmt.Sprintf("Failed to explain results: %v", err), id)
 		return
 	}
 
+	// Log successful experience
+	id, _ := rlDB.LogExperience("query", req.Query, sqlQuery, "Success")
 	log.Println("Query analysis finished.")
-	respondJSON(w, QueryResponse{Answer: explanation})
+	respondJSON(w, QueryResponse{InteractionID: id, Answer: explanation})
 }
 
 func respondJSON(w http.ResponseWriter, resp interface{}) {
@@ -297,7 +321,89 @@ func respondJSON(w http.ResponseWriter, resp interface{}) {
 	log.Println("Response sent to client.")
 }
 
-func respondError(w http.ResponseWriter, msg string) {
+func respondError(w http.ResponseWriter, msg string, id int64) {
 	log.Println("Error:", msg)
-	respondJSON(w, QueryResponse{Error: msg})
+	respondJSON(w, QueryResponse{InteractionID: id, Error: msg})
+}
+
+func handleRecommend(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB, client llm.Provider, rlDB *rl.DB) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	log.Println("Generating recommendations...")
+
+	var systemDataBuilder strings.Builder
+
+	// CPU
+	cpuRes, err := database.QueryMetrics("avg(cpu_usage_pct)")
+	if err == nil {
+		systemDataBuilder.WriteString(fmt.Sprintf("Global Avg CPU: %s\n", cpuRes))
+	}
+
+	// Memory
+	memRes, err := database.QueryMetrics("avg(memory_used_mb)")
+	if err == nil {
+		systemDataBuilder.WriteString(fmt.Sprintf("Global Avg Memory Used (MB): %s\n", memRes))
+	}
+
+	// Top Processes by CPU
+	topCPU, err := database.QueryMetrics("topk(5, process_cpu_pct)")
+	if err == nil {
+		systemDataBuilder.WriteString(fmt.Sprintf("Top 5 Processes by CPU:\n%s\n", topCPU))
+	}
+
+	// Top Processes by Memory
+	topMem, err := database.QueryMetrics("topk(5, process_memory_mb)")
+	if err == nil {
+		systemDataBuilder.WriteString(fmt.Sprintf("Top 5 Processes by Memory:\n%s\n", topMem))
+	}
+
+	// Recent Error Logs
+	errLogs, err := database.QueryLogs(`* | filter eventMessage: "error" OR messageType: "error" | limit 10`)
+	if err == nil {
+		systemDataBuilder.WriteString(fmt.Sprintf("Recent Error Logs:\n%s\n", errLogs))
+	}
+
+	systemData := systemDataBuilder.String()
+	log.Printf("System Data for Recommendations:\n%s", systemData)
+
+	recommendations, err := client.GenerateRecommendations(systemData)
+	if err != nil {
+		id, _ := rlDB.LogExperience("recommend", "Generate system recommendations", "", fmt.Sprintf("Failed to generate recommendations: %v", err))
+		respondError(w, fmt.Sprintf("Failed to generate recommendations: %v", err), id)
+		return
+	}
+
+	id, _ := rlDB.LogExperience("recommend", "Generate system recommendations", "", "Success")
+	log.Println("Recommendations generated successfully.")
+	respondJSON(w, QueryResponse{InteractionID: id, Answer: recommendations})
+}
+
+// FeedbackRequest defines the payload for submitting RL feedback.
+type FeedbackRequest struct {
+	InteractionID int64 `json:"interaction_id"`
+	Feedback      int   `json:"feedback"` // 1 = good, -1 = bad
+}
+
+func handleFeedback(w http.ResponseWriter, r *http.Request, rlDB *rl.DB) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FeedbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := rlDB.UpdateFeedback(req.InteractionID, req.Feedback); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update feedback: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status": "ok"}`))
 }

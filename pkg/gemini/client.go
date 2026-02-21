@@ -112,3 +112,28 @@ func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) 
 
 	return explanation, nil
 }
+
+func (c *Client) GenerateRecommendations(systemData string) (string, error) {
+	prompt := fmt.Sprintf("You are Zenith, an AI expert in system performance.\n"+
+		"Based on the following recent system data, provide 3-5 concrete recommendations for performance improvement.\n"+
+		"Be extremely concise, focus on actionable advice, and avoid conversational filler.\n\n"+
+		"System Data:\n%s\n\nRecommendations:", systemData)
+
+	resp, err := c.Model.GenerateContent(c.Ctx, genai.Text(prompt))
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("no response from Gemini")
+	}
+
+	recommendations := ""
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if text, ok := part.(genai.Text); ok {
+			recommendations += string(text)
+		}
+	}
+
+	return recommendations, nil
+}

@@ -9,6 +9,7 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
     - **macOS**: Native Unified Logging via CGO and `top` replacement using `gopsutil`.
     - **Windows**: Native Event Logs (`EvtQuery`) and SRUM parsing using direct ESE database access.
 - **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini or Ollama.
+- **System Recommendations**: Proactively analyzes system health (CPU, Memory, error logs) to provide actionable optimization tips.
 - **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
 - **Configurable**: Fully manageable via `config.json` or environment variables.
 
@@ -98,6 +99,21 @@ Use the CLI to ask questions about your system.
 ```bash
 ./bin/zenith-cli "What was the average CPU usage in the last hour?"
 ```
+
+### 4. System Recommendations
+
+Zenith can proactively analyze your system's metrics and logs to provide recommendations.
+
+```bash
+./bin/zenith-cli recommend
+```
+
+**Example Output:**
+> --- Zenith Recommendations ---
+> Based on the current system state:
+> 1. **High CPU Usage**: The process 'Browser' is consuming 25% CPU. Consider closing unused tabs.
+> 2. **Memory Pressure**: Global memory usage is at 85%. You may experience slowdowns.
+> 3. **Error Alerts**: Found 3 Disk I/O errors in the last hour. A hardware check is recommended.
 
 #### Windows & SRUM Examples
 Zenith on Windows collects historical data from the System Resource Usage Monitor (SRUM).

@@ -114,6 +114,15 @@ func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) 
 	return c.generate(prompt)
 }
 
+func (c *Client) GenerateRecommendations(systemData string) (string, error) {
+	prompt := fmt.Sprintf("System: You are Zenith, an AI expert in system performance. "+
+		"Based on the following recent system data, provide 3-5 concrete recommendations for performance improvement. "+
+		"Be extremely concise, focus on actionable advice, and avoid conversational filler.\n\n"+
+		"System Data:\n%s\n\nRecommendations:", systemData)
+
+	return c.generate(prompt)
+}
+
 func cleanSQL(s string) string {
 	s = strings.TrimSpace(s)
 
