@@ -16,6 +16,7 @@ cache/
 
 # Data and Databases
 zenith.db
+zenith_rl.db
 vm-data/
 vlogs-data/
 
