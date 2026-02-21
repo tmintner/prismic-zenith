@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -84,11 +85,15 @@ func main() {
 		log.Fatal("Gemini API key is required")
 	}
 
+	// Extract ports from URLs to start databases on the correct ports
+	metricsPort := extractPort(*metricsURL, cfg.MetricsPort)
+	logsPort := extractPort(*logsURL, cfg.LogsPort)
+
 	// Start VictoriaMetrics and VictoriaLogs
-	metricsCmd := startProcess(*metricsBin, "-storageDataPath", *metricsData, "-httpListenAddr", fmt.Sprintf(":%d", cfg.MetricsPort))
+	metricsCmd := startProcess(*metricsBin, "-storageDataPath", *metricsData, "-httpListenAddr", fmt.Sprintf(":%d", metricsPort))
 	defer stopProcess(metricsCmd)
 
-	logsCmd := startProcess(*logsBin, "-storageDataPath", *logsData, "-httpListenAddr", fmt.Sprintf(":%d", cfg.LogsPort))
+	logsCmd := startProcess(*logsBin, "-storageDataPath", *logsData, "-httpListenAddr", fmt.Sprintf(":%d", logsPort))
 	defer stopProcess(logsCmd)
 
 	// Wait a moment for databases to start
@@ -163,6 +168,21 @@ func main() {
 	}
 
 	log.Println("Zenith Server stopped.")
+}
+
+// extractPort parses a URL (e.g., http://localhost:8428) and returns the port as an int.
+// If parsing fails, it returns the provided default.
+func extractPort(urlStr string, defaultPort int) int {
+	parts := strings.Split(urlStr, ":")
+	if len(parts) >= 3 {
+		// e.g., ["http", "//localhost", "8428"]
+		portStr := strings.Trim(parts[len(parts)-1], "/")
+		port, err := strconv.Atoi(portStr)
+		if err == nil {
+			return port
+		}
+	}
+	return defaultPort
 }
 
 func startProcess(bin string, args ...string) *exec.Cmd {

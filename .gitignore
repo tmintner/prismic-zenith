@@ -1,7 +1,7 @@
 # Ignore build output
 bin/
-zenith-server
-zenith-server.exe
+/zenith-server
+/zenith-server.exe
 *.exe
 build_output*.txt
 test_log.go
