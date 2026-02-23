@@ -34,6 +34,26 @@ func main() {
 	idPtr := flag.Int64("id", 0, "The Interaction ID to provide feedback for")
 	flag.Parse()
 
+	args := flag.Args()
+
+	// Positional server address detection:
+	// If the first argument contains ":" and isn't a known command like "recommend",
+	// or if it starts with "http", treat it as the server address.
+	if len(args) > 0 {
+		firstArg := args[0]
+		isServerAddr := strings.HasPrefix(firstArg, "http://") || strings.HasPrefix(firstArg, "https://") ||
+			(strings.Contains(firstArg, ":") && firstArg != "recommend")
+
+		if isServerAddr {
+			// Ensure it has a scheme for the http client
+			if !strings.HasPrefix(firstArg, "http") {
+				firstArg = "http://" + firstArg
+			}
+			*serverAddr = firstArg
+			args = args[1:] // Shift args
+		}
+	}
+
 	if *feedbackPtr != "" {
 		if *idPtr == 0 {
 			fmt.Println("Error: --id is required when providing --feedback")
@@ -54,7 +74,6 @@ func main() {
 		return
 	}
 
-	args := flag.Args()
 	if len(args) == 0 {
 		fmt.Println("Please provide a query (e.g., 'How many errors in the last hour?'), 'recommend', or use --feedback")
 		os.Exit(1)

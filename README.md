@@ -101,7 +101,14 @@ victoria-logs -storageDataPath ./vlogs-data -httpListenAddr :9428
 Use the CLI to ask questions about your system.
 
 ```bash
+# Using default server address (from config.json)
 ./bin/zenith-cli "What was the average CPU usage in the last hour?"
+
+# Specifying server address as the first positional argument
+./bin/zenith-cli localhost:8080 "What was the average CPU usage in the last hour?"
+
+# Using a full URL as a positional argument
+./bin/zenith-cli http://192.168.1.5:8080 recommend
 ```
 
 ### 4. System Recommendations
