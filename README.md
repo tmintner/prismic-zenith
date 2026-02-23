@@ -39,9 +39,13 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
 
 ```json
 {
+    "server_host": "localhost",
     "server_port": 8080,
+    "metrics_host": "localhost",
     "metrics_port": 8428,
+    "logs_host": "localhost",
     "logs_port": 9428,
+    "ollama_host": "localhost",
     "ollama_port": 11434,
     "metrics_bin": "/opt/homebrew/bin/victoria-metrics",
     "logs_bin": "/opt/homebrew/bin/victoria-logs",
@@ -130,6 +134,7 @@ Zenith on Windows collects historical data from the System Resource Usage Monito
 ### Available Metrics
 - `cpu_usage_pct`: Overall system CPU usage.
 - `memory_used_mb` / `memory_free_mb`: System memory stats.
+- `process_cpu_pct`: Per-process CPU usage (labels: `pid`, `process_name`).
 - `process_memory_mb`: Per-process memory usage (labels: `pid`, `process_name`).
 - `srum_network_bytes_sent_total` / `srum_network_bytes_received_total`: (Windows) Network interface stats.
 - `srum_app_cycle_time_total`: (Windows) Historical CPU cycles per app.
