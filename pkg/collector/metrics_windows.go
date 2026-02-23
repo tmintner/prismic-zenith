@@ -92,6 +92,11 @@ func CollectProcessMetrics(database *db.VictoriaDB) error {
 			"process_name": name,
 		}
 		database.InsertMetric("process_memory_mb", float64(memInfo.RSS)/1024/1024, labels)
+
+		cpuPct, err := p.CPUPercent()
+		if err == nil && cpuPct > 1.0 {
+			database.InsertMetric("process_cpu_pct", cpuPct, labels)
+		}
 	}
 	return nil
 }

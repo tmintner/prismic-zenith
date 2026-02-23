@@ -162,12 +162,28 @@ func collectChannelLogs(database *db.VictoriaDB, channel, query string) error {
 				continue
 			}
 
+			// Map Windows Event Level to something VictoriaLogs can filter on
+			// 1: Critical, 2: Error, 3: Warning, 4: Information, 5: Verbose
+			levelStr := "info"
+			switch event.System.Level {
+			case 1:
+				levelStr = "critical"
+			case 2:
+				levelStr = "error"
+			case 3:
+				levelStr = "warning"
+			case 4:
+				levelStr = "info"
+			case 5:
+				levelStr = "debug"
+			}
+
 			// Format for VictoriaLogs
 			entry := db.LogEntry{
 				Timestamp:   event.System.TimeCreated.SystemTime,
 				ProcessName: event.System.Provider.Name,
 				Category:    fmt.Sprintf("EventID: %d", event.System.EventID),
-				LogLevel:    fmt.Sprintf("Level: %d", event.System.Level),
+				LogLevel:    levelStr,
 				// Message rendering requires a publisher metadata handle which is complex.
 				// We'll use the provider name and EventID as the core message for now,
 				// or if RenderingInfo is present (rare without explicit format render).

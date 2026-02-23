@@ -47,8 +47,8 @@ func main() {
 
 	port := flag.Int("port", cfg.ServerPort, "HTTP server port")
 	collectInterval := flag.String("interval", cfg.CollectInterval, "Collection interval (e.g., 5m, 1h)")
-	metricsURL := flag.String("metrics-url", fmt.Sprintf("http://localhost:%d", cfg.MetricsPort), "VictoriaMetrics URL")
-	logsURL := flag.String("logs-url", fmt.Sprintf("http://localhost:%d", cfg.LogsPort), "VictoriaLogs URL")
+	metricsURL := flag.String("metrics-url", fmt.Sprintf("http://%s:%d", cfg.MetricsHost, cfg.MetricsPort), "VictoriaMetrics URL")
+	logsURL := flag.String("logs-url", fmt.Sprintf("http://%s:%d", cfg.LogsHost, cfg.LogsPort), "VictoriaLogs URL")
 
 	// Default paths based on OS
 	defaultMetricsBin := cfg.MetricsBin
@@ -117,7 +117,7 @@ func main() {
 		llmProvider = client
 		log.Println("Using Gemini Provider")
 	case "ollama":
-		ollamaURL := fmt.Sprintf("http://localhost:%d", cfg.OllamaPort)
+		ollamaURL := fmt.Sprintf("http://%s:%d", cfg.OllamaHost, cfg.OllamaPort)
 		llmProvider = ollama.NewClient(ollamaURL, *modelName)
 		log.Printf("Using Ollama Provider at %s (Model: %s)", ollamaURL, *modelName)
 	default:

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"zenith/pkg/config"
 )
 
 type QueryRequest struct {
@@ -22,7 +23,13 @@ type QueryResponse struct {
 }
 
 func main() {
-	serverAddr := flag.String("server", "http://localhost:8080", "Zenith server address")
+	cfg, err := config.LoadConfig("config.json")
+	if err != nil {
+		fmt.Printf("Warning: Failed to load config.json, using defaults: %v\n", err)
+		cfg = &config.Config{ServerHost: "localhost", ServerPort: 8080}
+	}
+
+	serverAddr := flag.String("server", fmt.Sprintf("http://%s:%d", cfg.ServerHost, cfg.ServerPort), "Zenith server address")
 	feedbackPtr := flag.String("feedback", "", "Provide feedback on a previous interaction ('good' or 'bad')")
 	idPtr := flag.Int64("id", 0, "The Interaction ID to provide feedback for")
 	flag.Parse()

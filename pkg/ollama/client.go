@@ -29,9 +29,6 @@ type GenerateResponse struct {
 }
 
 func NewClient(baseURL, model string) *Client {
-	if baseURL == "" {
-		baseURL = "http://localhost:11434"
-	}
 	if model == "" {
 		model = "phi4-mini" // Default model
 	}

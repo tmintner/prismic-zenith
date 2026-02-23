@@ -7,9 +7,13 @@ import (
 )
 
 type Config struct {
+	ServerHost      string `json:"server_host"`
 	ServerPort      int    `json:"server_port"`
+	MetricsHost     string `json:"metrics_host"`
 	MetricsPort     int    `json:"metrics_port"`
+	LogsHost        string `json:"logs_host"`
 	LogsPort        int    `json:"logs_port"`
+	OllamaHost      string `json:"ollama_host"`
 	OllamaPort      int    `json:"ollama_port"`
 	MetricsBin      string `json:"metrics_bin"`
 	LogsBin         string `json:"logs_bin"`
@@ -31,9 +35,13 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
+		ServerHost:      "localhost",
 		ServerPort:      8080,
+		MetricsHost:     "localhost",
 		MetricsPort:     8428,
+		LogsHost:        "localhost",
 		LogsPort:        9428,
+		OllamaHost:      "localhost",
 		OllamaPort:      11434,
 		MetricsBin:      metricsBin,
 		LogsBin:         logsBin,
