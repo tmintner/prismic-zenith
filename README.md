@@ -153,3 +153,7 @@ Logs are ingested into VictoriaLogs with the following fields:
 - `processName`: Source of the log (e.g., ProviderName on Windows).
 - `messageType`: Log level (e.g., LevelDisplayName on Windows, info/error on macOS).
 - `eventMessage`: The actual log content.
+
+### Windows Testing (UTM)
+If you have a UTM VM named `Windows11`, you can use the integrated UTM skill to automate testing.
+Check `.agents/skills/utm-testing/SKILL.md` for more details on how to start the VM and run the test suite remotely.
