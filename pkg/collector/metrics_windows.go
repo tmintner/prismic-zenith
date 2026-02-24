@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"zenith/pkg/db"
@@ -142,43 +143,42 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 	// Ensure cleanup
 	defer os.Remove(destPath)
 
-	// Use diskshadow.exe to create a VSS snapshot of C: and mount it to a temporary alias
+	// Use WMI via PowerShell to create a VSS snapshot of C: (Supported on Windows 10/11 Client & Server)
 	// This safely bypasses the DiagTrack exclusive lock on SRUDB.dat
-	dsScriptPath := filepath.Join(tempDir, "zenith_vss.ds")
-	dsScriptContent := `set context persistent
-set verbose on
-add volume c: alias srum_shadow
-create
-expose %srum_shadow% Z:
-`
-	if err := os.WriteFile(dsScriptPath, []byte(dsScriptContent), 0644); err != nil {
-		return fmt.Errorf("failed to write diskshadow script: %w", err)
-	}
-	defer os.Remove(dsScriptPath)
+	psScript := `$vss = (Get-WmiObject -List Win32_ShadowCopy).Create('C:\', 'ClientAccessible'); $shadow = Get-WmiObject Win32_ShadowCopy | Where-Object { $_.ID -eq $vss.ShadowID }; Write-Output ($shadow.DeviceObject + "|||" + $vss.ShadowID)`
 
-	// Clean up the shadow volume when we are done
-	defer func() {
-		cleanupScriptPath := filepath.Join(tempDir, "zenith_vss_cleanup.ds")
-		cleanupScriptContent := `unexpose Z:
-delete shadows volume c:
-`
-		os.WriteFile(cleanupScriptPath, []byte(cleanupScriptContent), 0644)
-		exec.Command("diskshadow.exe", "/s", cleanupScriptPath).Run()
-		os.Remove(cleanupScriptPath)
-	}()
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", psScript)
+	outputBytes, err := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(outputBytes))
 
-	cmd := exec.Command("diskshadow.exe", "/s", dsScriptPath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("warning: diskshadow failed to create VSS snapshot (maybe missing on Home edition?): %v, output: %s\n", err, string(output))
-		// Fallback to direct raw copy (will likely fail with Access Denied if locked, but VSS is Best-Effort)
+	if err != nil {
+		fmt.Printf("warning: WMI failed to create VSS snapshot: %v, output: %s\n", err, output)
+		// Fallback to direct raw copy
 		if err := copyFile(srumDbPath, destPath); err != nil {
 			return fmt.Errorf("failed to copy SRUDB.dat directly after VSS failure: %w", err)
 		}
 	} else {
-		// If VSS succeeded, copy the completely unlocked file from the Z: snapshot
-		vssSrumPath := "Z:\\Windows\\System32\\sru\\SRUDB.dat"
-		if err := copyFile(vssSrumPath, destPath); err != nil {
-			return fmt.Errorf("failed to copy SRUDB.dat from VSS snapshot: %w", err)
+		// Parse the newly created Shadow Copy Volume Name and ID
+		parts := strings.Split(output, "|||")
+		if len(parts) != 2 {
+			fmt.Printf("warning: could not parse WMI VSS output: %s\n", output)
+			if err := copyFile(srumDbPath, destPath); err != nil {
+				return fmt.Errorf("failed to copy SRUDB.dat directly after VSS parse failure: %w", err)
+			}
+		} else {
+			shadowVolumeRoot := strings.TrimSpace(parts[0])
+			shadowID := strings.TrimSpace(parts[1])
+
+			// Schedule cleanup of the specific VSS snapshot we just made
+			defer func(id string) {
+				cleanupScript := fmt.Sprintf(`(Get-WmiObject Win32_ShadowCopy | Where-Object { $_.ID -eq '%s' }).Delete()`, id)
+				exec.Command("powershell", "-NoProfile", "-Command", cleanupScript).Run()
+			}(shadowID)
+
+			vssSrumPath := shadowVolumeRoot + `\Windows\System32\sru\SRUDB.dat`
+			if err := copyFile(vssSrumPath, destPath); err != nil {
+				return fmt.Errorf("failed to copy SRUDB.dat from VSS snapshot path %s: %w", vssSrumPath, err)
+			}
 		}
 	}
 
@@ -203,13 +203,25 @@ delete shadows volume c:
 	// 4. Read SrumIdMapTable: Id (Int32) -> Value (String, the App Name)
 	idMap := make(map[int32]string)
 
+	firstRowPrinted := false
 	err = catalog.DumpTable(srumIdMapTable, func(row *ordereddict.Dict) error {
-		idVal, ok := getInt32FromDict(row, "Id")
+		if !firstRowPrinted {
+			fmt.Printf("srum debug map keys: %v\n", row.Keys())
+			firstRowPrinted = true
+		}
+
+		idVal, ok := getInt32FromDict(row, "IdIndex")
+		if !ok {
+			idVal, ok = getInt32FromDict(row, "Id")
+		}
 		if !ok {
 			return nil
 		}
 
-		valStr, ok := row.Get("Value")
+		valStr, ok := row.Get("IdBlob")
+		if !ok {
+			valStr, ok = row.Get("Value")
+		}
 		if ok {
 			if s, ok := valStr.(string); ok {
 				idMap[idVal] = s
@@ -219,14 +231,21 @@ delete shadows volume c:
 	})
 
 	if err != nil {
+		fmt.Printf("srum warning: %s not found, trying fallback %s\n", srumIdMapTable, srumIdMapTableAlt)
 		// Try alternative table name
-		catalog.DumpTable(srumIdMapTableAlt, func(row *ordereddict.Dict) error {
-			idVal, ok := getInt32FromDict(row, "Id")
+		err = catalog.DumpTable(srumIdMapTableAlt, func(row *ordereddict.Dict) error {
+			idVal, ok := getInt32FromDict(row, "IdIndex")
+			if !ok {
+				idVal, ok = getInt32FromDict(row, "Id")
+			}
 			if !ok {
 				return nil
 			}
 
-			valStr, ok := row.Get("Value")
+			valStr, ok := row.Get("IdBlob")
+			if !ok {
+				valStr, ok = row.Get("Value")
+			}
 			if ok {
 				if s, ok := valStr.(string); ok {
 					idMap[idVal] = s
@@ -234,19 +253,28 @@ delete shadows volume c:
 			}
 			return nil
 		})
+		if err != nil {
+			fmt.Printf("srum warning: both %s and fallback %s not found in catalog\n", srumIdMapTable, srumIdMapTableAlt)
+		}
 	}
+	fmt.Printf("srum debug: successfully mapped %d application IDs\n", len(idMap))
 
 	// 5. Read Application Resource Usage Table
 	// Limit processing to recent entries or just top consumers to avoid heavy load
+	metricsInserted := 0
 	count := 0
 	err = catalog.DumpTable(srumAppResourceTable, func(row *ordereddict.Dict) error {
 		count++
-		if count > 500 { // Limit for safety in this demo
+		if count > 5000 { // Increased limit for safety
 			return io.EOF // Stop iteration
 		}
 
 		// Extract fields
-		appId, _ := getInt32FromDict(row, "AppId")
+		appId, ok := getInt32FromDict(row, "AppId")
+		if !ok {
+			return nil
+		}
+
 		cycleTime, _ := getInt64FromDict(row, "CycleTime")
 		bytesRead, _ := getInt64FromDict(row, "BytesRead")
 		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
@@ -264,8 +292,11 @@ delete shadows volume c:
 		database.InsertMetric("srum_app_cycle_time_total", float64(cycleTime), labels)
 		database.InsertMetric("srum_app_bytes_read_total", float64(bytesRead), labels)
 		database.InsertMetric("srum_app_bytes_written_total", float64(bytesWritten), labels)
+		metricsInserted++
 		return nil
 	})
+
+	fmt.Printf("srum debug: successfully inserted %d application metrics from %d parsed rows\n", metricsInserted, count)
 
 	if err != nil && err != io.EOF {
 		return fmt.Errorf("failed to dump usage table: %w", err)
