@@ -30,8 +30,8 @@ func LoadConfig(path string) (*Config, error) {
 	metricsBin := "/opt/homebrew/bin/victoria-metrics"
 	logsBin := "/opt/homebrew/bin/victoria-logs"
 	if runtime.GOOS == "windows" {
-		metricsBin = "victoria-metrics.exe"
-		logsBin = "victoria-logs.exe"
+		metricsBin = "./victoria-metrics.exe"
+		logsBin = "./victoria-logs.exe"
 	}
 
 	cfg := &Config{

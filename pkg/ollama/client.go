@@ -78,13 +78,18 @@ func (c *Client) generate(prompt string) (string, error) {
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	prompt := fmt.Sprintf("You are Zenith, an AI expert in system performance. "+
 		"You have access to two databases:\n"+
-		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'memory_free_mb', 'process_cpu_pct', 'process_memory_mb', 'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'.\n"+
-		"2. VictoriaLogs (Logs): Query using LogsQL. Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
-		"Based on the user query, provide ONLY the database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
-		"Rules for Process Names:\n"+
-		"- Process names can be unpredictable (e.g., 'Ollama' vs 'ollama').\n"+
-		"- ALWAYS use case-insensitive regex for process names: `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n\n"+
-		"Example MetricsQL: `avg(cpu_usage_pct)`, `max(process_memory_mb{process_name=~\"(?i)ollama\"})` \n"+
+		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'process_cpu_pct', 'process_memory_mb', 'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'.\n"+
+		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
+		"Based on the user query, provide EXACTLY ONE database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
+		"Rules for Queries:\n"+
+		"- Return ONLY ONE line. Multi-line responses will fail.\n"+
+		"- Disk usage (read/write bytes) and Network bytes are ALWAYS METRICS (METRIC:), never Logs (LOG:).\n"+
+		"- For SRUM app metrics, use the label `app_name`.\n"+
+		"- For process metrics, use the label `process_name`.\n"+
+		"- For MetricsQL regex: `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n"+
+		"- For LogsQL filters: ALWAYS use `:` instead of `=`, e.g., `processName:\"wifid\"`.\n"+
+		"- For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n\n"+
+		"Example MetricsQL: `avg(cpu_usage_pct)`, `topk(5, srum_app_bytes_read_total)` \n"+
 		"Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
 		"Query: %s\n\n"+
 		"Response:", userQuery)
@@ -98,11 +103,13 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 }
 
 func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) {
-	prompt := fmt.Sprintf("System: You are Zenith, an AI expert in macOS system performance. "+
+	prompt := fmt.Sprintf("System: You are Zenith, an AI expert in system performance. "+
 		"Analyze the database results below to answer the user's question. "+
-		"Be extremely concise, focus on data insights, and avoid conversational filler. "+
-		"Do NOT explain the SQL query syntax. "+
-		"If the results are empty, say 'No relevant data found'.\n\n"+
+		"Rules:\n"+
+		"1. If the results are 'NO_DATA_FOUND' or empty, you MUST say 'No data found for this query'.\n"+
+		"2. Do NOT invent names, PIDs, or values.\n"+
+		"3. Do NOT use placeholders like 'Application X'.\n"+
+		"4. Be extremely concise.\n\n"+
 		"User Query: %s\n"+
 		"SQL Executed: %s\n"+
 		"Database Results: %s\n\n"+
@@ -131,7 +138,6 @@ func cleanSQL(s string) string {
 		}
 		end := strings.Index(s[start:], "</think>")
 		if end == -1 {
-			// If tag is open but not closed, strip from start
 			s = s[:start]
 			break
 		}
@@ -149,39 +155,49 @@ func cleanSQL(s string) string {
 	s = strings.Join(lines, "\n")
 	s = strings.TrimSpace(s)
 
-	// 3. Remove trailing commas before FROM (common model mistake)
-	// This is a simple regex-like fix: replace ", FROM" (case insensitive) with " FROM"
-	s = strings.ReplaceAll(s, ",\nFROM", "\nFROM")
-	s = strings.ReplaceAll(s, ", FROM", " FROM")
-	s = strings.ReplaceAll(s, ",\nfrom", "\nfrom")
-	s = strings.ReplaceAll(s, ", from", " from")
+	// 3. Extract the best line
+	var selected string
+	lines = strings.Split(s, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if strings.HasPrefix(upper, "METRIC:") || strings.HasPrefix(upper, "LOG:") {
+			selected = trimmed
+			break
+		}
+	}
 
-	// 4. If the model wrapped it in triple backticks, extract it
-	if strings.Contains(s, "```") {
-		parts := strings.Split(s, "```")
-		for _, p := range parts {
-			trimmed := strings.TrimSpace(p)
-			lowered := strings.ToLower(trimmed)
-			if strings.HasPrefix(lowered, "sql") {
-				return strings.TrimSpace(trimmed[3:])
-			}
-			// If it contains keywords but no lang tag
-			if len(trimmed) > 0 && (strings.Contains(lowered, "select") || strings.Contains(lowered, "insert") || strings.Contains(lowered, "update")) {
-				return trimmed
+	// Fallback: pick the first non-empty line
+	if selected == "" {
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				selected = trimmed
+				break
 			}
 		}
 	}
 
-	// 5. Fallback: Check if there's any text before the first SELECT
-	lowered := strings.ToLower(s)
-	if idx := strings.Index(lowered, "select"); idx != -1 {
-		// Try to see if it's the start of a statement
-		return strings.TrimSpace(s[idx:])
+	if selected == "" {
+		return s
 	}
 
-	// Final Fallback: strip common prefixes
-	s = strings.TrimPrefix(s, "SQL:")
-	s = strings.TrimPrefix(s, "Sql:")
-	s = strings.TrimPrefix(s, "sql:")
-	return strings.TrimSpace(s)
+	// Globally remove all instances of METRIC: and LOG: from the selected line
+	upperSelected := strings.ToUpper(selected)
+	hasLog := strings.HasPrefix(upperSelected, "LOG:")
+
+	res := selected
+	reMetric := strings.NewReplacer("METRIC:", "", "metric:", "", "Metric:", "")
+	reLog := strings.NewReplacer("LOG:", "", "log:", "", "Log:", "")
+	res = reMetric.Replace(res)
+	res = reLog.Replace(res)
+	res = strings.TrimSpace(res)
+
+	if hasLog {
+		return "LOG:" + res
+	}
+	return "METRIC:" + res
 }

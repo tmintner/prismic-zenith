@@ -1,10 +1,12 @@
 #!/bin/bash
-# wait_for_vm.sh "VM_NAME"
+# wait_for_vm.sh "HOST" [PORT]
 
-VM_NAME=$1
+HOST=${1:-"windows11.local"}
+PORT=${2:-22}
+VM_NAME="Windows11"
 UTMCTL="/usr/local/bin/utmctl"
 
-echo "Starting VM: $VM_NAME..."
+echo "Starting VM: $VM_NAME via utmctl..."
 $UTMCTL start "$VM_NAME" 2>/dev/null || echo "VM might already be running."
 
 echo "Waiting for VM $VM_NAME to report 'running' status..."
@@ -17,14 +19,11 @@ while true; do
   sleep 2
 done
 
-echo "Waiting for guest agent to be responsive (checking IP)..."
-while true; do
-  IP=$($UTMCTL ip-address "$VM_NAME" 2>/dev/null)
-  if [ ! -empty "$IP" ] && [ "$IP" != "No IP addresses found." ]; then
-    echo "Guest agent is ready. IP: $IP"
-    break
-  fi
+echo "Waiting for SSH service on $HOST:$PORT to be responsive..."
+while ! nc -z -w 5 "$HOST" "$PORT"; do
+  echo "SSH not ready yet, retrying..."
   sleep 5
 done
 
+echo "SSH service is up on $HOST:$PORT."
 echo "VM $VM_NAME is ready for tests."

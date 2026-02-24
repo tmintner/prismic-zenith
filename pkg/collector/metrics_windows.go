@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -121,11 +122,19 @@ func collectNetworkMetrics(database *db.VictoriaDB) error {
 
 const (
 	srumDbPath           = "C:\\Windows\\System32\\sru\\SRUDB.dat"
-	srumIdMapTable       = "SrumIdMapTable"
+	srumIdMapTable       = "SruDbIdMapTable" // Primary name
+	srumIdMapTableAlt    = "SrumIdMapTable"  // Alternative name
 	srumAppResourceTable = "{D10CA2FE-6FCF-4F6D-848E-B2E99266FA89}"
 )
 
-func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
+func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
+	// Recover from panics in the third-party ESE parser
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("SRUM parsing panicked (likely dirty SRUDB.dat): %v", r)
+		}
+	}()
+
 	// 1. Copy SRUDB.dat to a temporary location because it's locked by the system
 	tempDir := os.TempDir()
 	destPath := filepath.Join(tempDir, "SRUDB_zenith_copy.dat")
@@ -133,8 +142,44 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
 	// Ensure cleanup
 	defer os.Remove(destPath)
 
-	if err := copyFile(srumDbPath, destPath); err != nil {
-		return fmt.Errorf("failed to copy SRUDB.dat: %w", err)
+	// Use diskshadow.exe to create a VSS snapshot of C: and mount it to a temporary alias
+	// This safely bypasses the DiagTrack exclusive lock on SRUDB.dat
+	dsScriptPath := filepath.Join(tempDir, "zenith_vss.ds")
+	dsScriptContent := `set context persistent
+set verbose on
+add volume c: alias srum_shadow
+create
+expose %srum_shadow% Z:
+`
+	if err := os.WriteFile(dsScriptPath, []byte(dsScriptContent), 0644); err != nil {
+		return fmt.Errorf("failed to write diskshadow script: %w", err)
+	}
+	defer os.Remove(dsScriptPath)
+
+	// Clean up the shadow volume when we are done
+	defer func() {
+		cleanupScriptPath := filepath.Join(tempDir, "zenith_vss_cleanup.ds")
+		cleanupScriptContent := `unexpose Z:
+delete shadows volume c:
+`
+		os.WriteFile(cleanupScriptPath, []byte(cleanupScriptContent), 0644)
+		exec.Command("diskshadow.exe", "/s", cleanupScriptPath).Run()
+		os.Remove(cleanupScriptPath)
+	}()
+
+	cmd := exec.Command("diskshadow.exe", "/s", dsScriptPath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("warning: diskshadow failed to create VSS snapshot (maybe missing on Home edition?): %v, output: %s\n", err, string(output))
+		// Fallback to direct raw copy (will likely fail with Access Denied if locked, but VSS is Best-Effort)
+		if err := copyFile(srumDbPath, destPath); err != nil {
+			return fmt.Errorf("failed to copy SRUDB.dat directly after VSS failure: %w", err)
+		}
+	} else {
+		// If VSS succeeded, copy the completely unlocked file from the Z: snapshot
+		vssSrumPath := "Z:\\Windows\\System32\\sru\\SRUDB.dat"
+		if err := copyFile(vssSrumPath, destPath); err != nil {
+			return fmt.Errorf("failed to copy SRUDB.dat from VSS snapshot: %w", err)
+		}
 	}
 
 	// 2. Create ESE Context
@@ -172,8 +217,23 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
 		}
 		return nil
 	})
+
 	if err != nil {
-		fmt.Printf("warning: failed to dump SrumIdMapTable: %v\n", err)
+		// Try alternative table name
+		catalog.DumpTable(srumIdMapTableAlt, func(row *ordereddict.Dict) error {
+			idVal, ok := getInt32FromDict(row, "Id")
+			if !ok {
+				return nil
+			}
+
+			valStr, ok := row.Get("Value")
+			if ok {
+				if s, ok := valStr.(string); ok {
+					idMap[idVal] = s
+				}
+			}
+			return nil
+		})
 	}
 
 	// 5. Read Application Resource Usage Table

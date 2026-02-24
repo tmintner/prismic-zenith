@@ -186,6 +186,14 @@ func extractPort(urlStr string, defaultPort int) int {
 }
 
 func startProcess(bin string, args ...string) *exec.Cmd {
+	// Security fix for Windows: Go 1.19+ doesn't allow running executables
+	// relative to current directory without an explicit path separator.
+	if !filepath.IsAbs(bin) && !strings.Contains(bin, string(filepath.Separator)) {
+		if _, err := os.Stat(bin); err == nil {
+			bin = "." + string(filepath.Separator) + bin
+		}
+	}
+
 	cmd := exec.Command(bin, args...)
 	// Set stdout/stderr to files or just discard if they are too chatty
 	// For debugging, we can redirect to files
@@ -295,13 +303,19 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB
 
 		log.Printf("Attempt %d: Executing Query: %s", attempt, sqlQuery)
 
-		if strings.HasPrefix(sqlQuery, "LOG:") {
-			query := strings.TrimSpace(strings.TrimPrefix(sqlQuery, "LOG:"))
+		if strings.HasPrefix(strings.ToUpper(sqlQuery), "LOG:") {
+			query := strings.TrimSpace(sqlQuery[4:])
 			results, err = database.QueryLogs(query)
 		} else {
 			// Default to Metrics or explicit METRIC: prefix
-			query := strings.TrimSpace(strings.TrimPrefix(sqlQuery, "METRIC:"))
-			results, err = database.QueryMetrics(query)
+			// If stripping METRIC: returned the same string, it might not have had the prefix or was already cleaned.
+			// However, since GenerateSQL is supposed to return the prefix, we should be careful.
+			// Let's use a more robust trim.
+			actualQuery := sqlQuery
+			if strings.HasPrefix(strings.ToUpper(actualQuery), "METRIC:") {
+				actualQuery = strings.TrimSpace(actualQuery[7:])
+			}
+			results, err = database.QueryMetrics(actualQuery)
 		}
 
 		if err != nil {
@@ -320,6 +334,12 @@ func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB
 		log.Printf("Attempt %d: Query Executed successfully.", attempt)
 		// Success!
 		break
+	}
+
+	// Handle empty results before calling ExplainResults
+	results = strings.TrimSpace(results)
+	if results == "" || results == "[]" || results == "{}" || strings.HasPrefix(results, "error") {
+		results = "NO_DATA_FOUND"
 	}
 
 	explanation, err := client.ExplainResults(req.Query, sqlQuery, results)

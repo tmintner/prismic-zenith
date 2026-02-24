@@ -1,39 +1,42 @@
 ---
-name: UTM VM Management
-description: Instructions and scripts for managing the "Windows11" UTM VM to test Windows-specific Zenith functionality.
+name: UTM VM Management (SSH)
+description: Instructions and scripts for managing the "Windows11" UTM VM via SSH to test Windows-specific Zenith functionality.
 ---
 
-# UTM VM Management Skill
+# UTM VM Management Skill (SSH)
 
-This skill allows Antigravity to automate testing on a Windows 11 virtual machine running in UTM.
+This skill allows Antigravity to automate testing on a Windows 11 virtual machine using `utmctl` for lifecycle and SSH for remote interaction.
+
+## Prerequisites
+- **OpenSSH Server** must be enabled on the Windows VM.
+- The VM should be reachable via a hostname (default: `windows11.local`) or a static IP.
+- SSH keys should be configured to avoid password prompts.
 
 ## Commands
 
-Always use the absolute path `/usr/local/bin/utmctl` on the host (macOS).
-
-### 1. VM Lifecycle
+### 1. VM Lifecycle (Host Side)
 - **Start VM**: `/usr/local/bin/utmctl start "Windows11"`
 - **Stop VM**: `/usr/local/bin/utmctl stop "Windows11"`
 - **Check Status**: `/usr/local/bin/utmctl status "Windows11"`
 
-### 2. Execution & Interaction
-- **Run Command**: `/usr/local/bin/utmctl exec "Windows11" -- cmd /c [command]`
-- **Wait for IP**: `/usr/local/bin/utmctl ip-address "Windows11"` (Useful to verify the guest agent is responsive).
+### 2. Execution & Interaction (Remote)
+- **Run Command**: `ssh user@windows11.local "cmd /c [command]"`
+- **Example**: `ssh user@windows11.local "whoami"`
 
 ### 3. File Transfer
-- **Push File**: `/usr/local/bin/utmctl file push "Windows11" [host_path] [guest_path]`
-- **Pull File**: `/usr/local/bin/utmctl file pull "Windows11" [guest_path] [host_path]`
+- **Push File**: `scp [host_path] user@windows11.local:[guest_path]`
+- **Example**: `scp bin/win64/zenith-server.exe user@windows11.local:C:/Users/Public/`
 
 ## Common Workflows
 
-### Waiting for VM Boot
-If the VM was just started, you may need to poll for status until it's "running" AND the guest agent is responsive. Use the `scripts/wait_for_vm.sh` script for this.
+### Waiting for SSH Readiness
+If the VM was just started, use the `scripts/wait_for_vm.sh` script to poll port 22 until the SSH service is responsive.
 
 ### Running Zenith Tests
 1. Build the Windows binaries: `make build-windows`
 2. Push them to the VM:
    ```bash
-   /usr/local/bin/utmctl file push "Windows11" bin/win64/zenith-server.exe C:\Users\Public\zenith-server.exe
-   /usr/local/bin/utmctl file push "Windows11" bin/win64/zenith-cli.exe C:\Users\Public\zenith-cli.exe
+   scp bin/win64/zenith-server.exe user@windows11.local:C:/Users/Public/
+   scp bin/win64/zenith-cli.exe user@windows11.local:C:/Users/Public/
    ```
-3. Run the server and test commands via `utmctl exec`.
+3. Run the server and test commands via `ssh`.
