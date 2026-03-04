@@ -96,8 +96,8 @@ func DownloadModel(url, destPath string) error {
 	return nil
 }
 
-// DefaultModelURL is the HuggingFace URL for the default model (TinyLlama-1.1B)
-const DefaultModelURL = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+// DefaultModelURL is the HuggingFace URL for the default model (Phi-4-mini)
+const DefaultModelURL = "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf"
 
 // EnsureModel checks if the model exists at localModelPath.
 // If not, it downloads the default model to that path.
@@ -107,6 +107,6 @@ func EnsureModel(localModelPath string) error {
 		return nil // Extant
 	}
 
-	log.Printf("Model missing: auto-downloading default TinyLlama GGUF...")
+	log.Printf("Model missing: auto-downloading default Phi-4-mini GGUF...")
 	return DownloadModel(DefaultModelURL, localModelPath)
 }

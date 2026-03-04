@@ -16,7 +16,7 @@
     "llamacpp_host": "localhost",
     "llamacpp_port": 8080,
     "llamacpp_bin": "llama-server",
-    "llamacpp_model": "./models/phi4-mini.gguf",
+    "llamacpp_model": "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
 }

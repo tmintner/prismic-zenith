@@ -58,7 +58,7 @@ func LoadConfig(path string) (*Config, error) {
 		LlamaCppHost:    "localhost",
 		LlamaCppPort:    8080,
 		LlamaCppBin:     llamaBin,
-		LlamaCppModel:   "./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+		LlamaCppModel:   "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
 		CollectInterval: "5m",
 	}
 

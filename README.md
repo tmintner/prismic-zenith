@@ -11,7 +11,7 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 - **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini, Ollama, or a built-in `llama.cpp` integration.
 - **System Recommendations**: Proactively analyzes system health (CPU, Memory, error logs) to provide actionable optimization tips.
 - **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
-- **Zero-Setup AI**: The `llama.cpp` provider automatically downloads a default model (TinyLlama) on first run if you don't provide your own, allowing for immediate offline analysis without complex setup.
+- **Zero-Setup AI**: The `llama.cpp` provider automatically downloads a default model (Phi-4-mini) on first run if you don't provide your own, allowing for immediate offline analysis without complex setup.
 - **Configurable**: Fully manageable via `config.json` or environment variables.
 
 ## Components
@@ -57,14 +57,14 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
     "llamacpp_host": "localhost",
     "llamacpp_port": 8080,
     "llamacpp_bin": "llama-server",
-    "llamacpp_model": "./models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+    "llamacpp_model": "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
 }
 ```
 
 > [!TIP]
-> If you set `"llm_provider": "llamacpp"` and leave the `llamacpp_model` field empty or pointing to a non-existent file, Zenith will automatically download the TinyLlama 1.1B model on its first startup.
+> If you set `"llm_provider": "llamacpp"` and leave the `llamacpp_model` field empty or pointing to a non-existent file, Zenith will automatically download the Phi-4-mini 3.8B model on its first startup.
 
 > [!TIP]
 > You can also set `GEMINI_API_KEY` as an environment variable to avoid storing it in plain text.
