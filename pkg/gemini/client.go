@@ -65,13 +65,18 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- Fields: processName, subsystem, category, messageType, eventMessage\n"+
 		"- Syntaxes: `field:value`, `field:\"exact string\"`, `field:~\"regex\"` \n"+
 		"- Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
-		"IMPORTANT:\n"+
-		"1. Disk usage (read/write bytes) and Network bytes are METRICS, not Logs.\n"+
-		"2. For SRUM app metrics, use the label `app_name`.\n"+
-		"3. For process metrics, use the label `process_name`.\n"+
-		"4. Do NOT use '=' for LogsQL filters; use ':'.\n"+
-		"5. For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n"+
-		"6. Return ONLY ONE query. No preamble, no multi-line list.\n\n"+
+		"Rules:\n"+
+		"1. Return ONLY ONE line. Do NOT truncate the query or cut off metric names (e.g. output `srum_network_bytes_sent_total`, NOT `srum_net`).\n"+
+		"2. NEVER combine metrics and logs in the same query. Choose ONE.\n"+
+		"3. SRUM data (network, disk, cycle time) is exclusively stored as METRICS, never as LOGS.\n"+
+		"4. NEVER compare metrics to strings (e.g. `metric == \"\"`). To check for existence, simply query the metric name (e.g., `srum_app_bytes_read_total > 0`).\n"+
+		"5. For SRUM app metrics, use the label `app_name`.\n"+
+		"6. MetricsQL uses lowercase logical operators: `and`, `or`, `unless` (NEVER `AND`/`OR`).\n"+
+		"7. LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n"+
+		"8. LogsQL uses uppercase logical operators: `AND`, `OR`.\n"+
+		"9. For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n"+
+		"Example MetricsQL: `METRIC:srum_network_bytes_sent_total > 0 or srum_network_bytes_received_total > 0`\n"+
+		"Example LogsQL: `LOG:eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\nResponse:", userQuery)
 
 	resp, err := c.Model.GenerateContent(c.Ctx, genai.Text(prompt))
