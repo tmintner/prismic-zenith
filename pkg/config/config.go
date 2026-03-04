@@ -30,8 +30,8 @@ func LoadConfig(path string) (*Config, error) {
 	metricsBin := "/opt/homebrew/bin/victoria-metrics"
 	logsBin := "/opt/homebrew/bin/victoria-logs"
 	if runtime.GOOS == "windows" {
-		metricsBin = "./victoria-metrics.exe"
-		logsBin = "./victoria-logs.exe"
+		metricsBin = "victoria-metrics.exe"
+		logsBin = "victoria-logs.exe"
 	}
 
 	cfg := &Config{
@@ -47,7 +47,7 @@ func LoadConfig(path string) (*Config, error) {
 		LogsBin:         logsBin,
 		MetricsData:     "./vm-data",
 		LogsData:        "./vlogs-data",
-		LLMProvider:     "gemini",
+		LLMProvider:     "ollama",
 		OllamaModel:     "phi4-mini",
 		CollectInterval: "5m",
 	}

@@ -51,7 +51,7 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
     "logs_bin": "/opt/homebrew/bin/victoria-logs",
     "metrics_data": "./vm-data",
     "logs_data": "./vlogs-data",
-    "llm_provider": "gemini",
+    "llm_provider": "ollama",
     "ollama_model": "phi4-mini",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
