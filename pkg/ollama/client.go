@@ -83,14 +83,17 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"Based on the user query, provide EXACTLY ONE database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
 		"Rules for Queries:\n"+
 		"- Return ONLY ONE line. Multi-line responses will fail.\n"+
-		"- Disk usage (read/write bytes) and Network bytes are ALWAYS METRICS (METRIC:), never Logs (LOG:).\n"+
+		"- NEVER combine metrics and logs in the same query. Choose ONE.\n"+
+		"- SRUM data (network, disk, cycle time) is exclusively stored as METRICS, never as LOGS.\n"+
+		"- NEVER compare metrics to strings (e.g. `metric == \"\"`). To check for existence, simply query the metric name (e.g., `srum_app_bytes_read_total > 0`).\n"+
 		"- For SRUM app metrics, use the label `app_name`.\n"+
 		"- For process metrics, use the label `process_name`.\n"+
-		"- For MetricsQL regex: `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n"+
-		"- For LogsQL filters: ALWAYS use `:` instead of `=`, e.g., `processName:\"wifid\"`.\n"+
+		"- MetricsQL regex uses `=~`, e.g., `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n"+
+		"- LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n"+
+		"- LogsQL uses `AND`/`OR` for logic, NEVER `,` or `|`.\n"+
 		"- For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n\n"+
-		"Example MetricsQL: `avg(cpu_usage_pct)`, `topk(5, srum_app_bytes_read_total)` \n"+
-		"Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
+		"Example MetricsQL: `avg(cpu_usage_pct)`, `srum_network_bytes_sent_total > 0`\n"+
+		"Example LogsQL: `eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\n"+
 		"Response:", userQuery)
 

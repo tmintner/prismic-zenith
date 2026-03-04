@@ -13,6 +13,10 @@
     "logs_data": "./vlogs-data",
     "llm_provider": "ollama",
     "ollama_model": "phi4-mini",
+    "llamacpp_host": "localhost",
+    "llamacpp_port": 8080,
+    "llamacpp_bin": "llama-server",
+    "llamacpp_model": "./models/phi4-mini.gguf",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
 }

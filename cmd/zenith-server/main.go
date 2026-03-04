@@ -21,6 +21,7 @@ import (
 	"zenith/pkg/config"
 	"zenith/pkg/db"
 	"zenith/pkg/gemini"
+	"zenith/pkg/llamacpp"
 	"zenith/pkg/llm"
 	"zenith/pkg/ollama"
 	"zenith/pkg/rl"
@@ -53,6 +54,7 @@ func main() {
 	// Default paths based on OS
 	defaultMetricsBin := cfg.MetricsBin
 	defaultLogsBin := cfg.LogsBin
+	defaultLlamaBin := cfg.LlamaCppBin
 	if runtime.GOOS == "windows" {
 		if !strings.HasSuffix(defaultMetricsBin, ".exe") {
 			defaultMetricsBin = "victoria-metrics.exe"
@@ -60,12 +62,17 @@ func main() {
 		if !strings.HasSuffix(defaultLogsBin, ".exe") {
 			defaultLogsBin = "victoria-logs.exe"
 		}
+		if !strings.HasSuffix(defaultLlamaBin, ".exe") {
+			defaultLlamaBin = "llama-server.exe"
+		}
 	}
 
 	metricsBin := flag.String("metrics-bin", defaultMetricsBin, "Path to victoria-metrics binary")
 	logsBin := flag.String("logs-bin", defaultLogsBin, "Path to victoria-logs binary")
 	metricsData := flag.String("metrics-data", cfg.MetricsData, "Path to VictoriaMetrics data")
 	logsData := flag.String("logs-data", cfg.LogsData, "Path to VictoriaLogs data")
+	llamaBin := flag.String("llama-bin", defaultLlamaBin, "Path to llama-server binary")
+	llamaModel := flag.String("llama-model", cfg.LlamaCppModel, "Path to downloaded .gguf model for llama.cpp")
 
 	envKey := os.Getenv("GEMINI_API_KEY")
 	defaultKey := envKey
@@ -76,8 +83,8 @@ func main() {
 		}
 	}
 
-	provider := flag.String("provider", cfg.LLMProvider, "LLM Provider (gemini, ollama)")
-	modelName := flag.String("model", cfg.OllamaModel, "Model name for local provider")
+	provider := flag.String("provider", cfg.LLMProvider, "LLM Provider (gemini, ollama, llamacpp)")
+	modelName := flag.String("model", cfg.OllamaModel, "Model name for ollama local provider")
 	apiKey := flag.String("key", defaultKey, "Gemini API Key")
 	flag.Parse()
 
@@ -120,6 +127,22 @@ func main() {
 		ollamaURL := fmt.Sprintf("http://%s:%d", cfg.OllamaHost, cfg.OllamaPort)
 		llmProvider = ollama.NewClient(ollamaURL, *modelName)
 		log.Printf("Using Ollama Provider at %s (Model: %s)", ollamaURL, *modelName)
+	case "llamacpp":
+		// Auto-download model if missing
+		if err := llamacpp.EnsureModel(*llamaModel); err != nil {
+			log.Fatalf("failed to ensure llama model: %v", err)
+		}
+
+		// Start llama-server process
+		llamaURL := fmt.Sprintf("http://%s:%d", cfg.LlamaCppHost, cfg.LlamaCppPort)
+		llamaCmd := startProcess(*llamaBin, "-m", *llamaModel, "--host", cfg.LlamaCppHost, "--port", fmt.Sprintf("%d", cfg.LlamaCppPort))
+		defer stopProcess(llamaCmd)
+
+		// Wait a moment for server to start
+		time.Sleep(2 * time.Second)
+
+		llmProvider = llamacpp.NewClient(llamaURL)
+		log.Printf("Using Llama.cpp Provider at %s", llamaURL)
 	default:
 		log.Fatalf("Unknown provider: %s", *provider)
 	}
