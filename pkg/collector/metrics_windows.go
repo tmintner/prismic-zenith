@@ -332,37 +332,24 @@ func decodeUTF16HexString(s string) string {
 	return string(utf16.Decode(u16))
 }
 
-// sanitizeAppName extracts a human-readable app name from a full device path or
-// package name.  For example:
-//   - `\Device\HarddiskVolume3\Windows\System32\csrss.exe` -> `csrss.exe`
-//   - `Microsoft.WindowsTerminal_1.22.11141.0_arm64__8wekyb3d8bbwe` -> `WindowsTerminal`
+// sanitizeAppName cleans up an app name decoded from SRUM, stripping null bytes
+// and normalising device paths to use forward slashes so they are safe as
+// VictoriaMetrics label values.  Full paths are preserved so the LLM has
+// maximum context when analysing disk/CPU usage.
 func sanitizeAppName(name string) string {
+	name = strings.TrimSpace(name)
+	// Strip embedded null bytes that remain after UTF-16 decoding
+	name = strings.ReplaceAll(name, "\x00", "")
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return name
 	}
-	// Device paths: grab the basename
-	if strings.HasPrefix(name, `\Device\`) || strings.HasPrefix(name, `\`) {
-		base := filepath.Base(name)
-		// Strip any trailing null chars that survived
-		base = strings.TrimRight(base, "\x00")
-		if base != "" && base != "." {
-			return base
-		}
+	// Normalise Windows device paths: replace backslashes with forward slashes
+	// so the value is safe in Prometheus label format without extra escaping.
+	if strings.HasPrefix(name, `\`) {
+		name = strings.ReplaceAll(name, `\`, "/")
 	}
-	// Windows Store package IDs: `Publisher.AppName_Version_arch__hash`
-	// Try to extract just the short AppName part (second dot-delimited segment)
-	if idx := strings.Index(name, "."); idx != -1 {
-		rest := name[idx+1:]
-		if end := strings.IndexAny(rest, "_.!"); end != -1 {
-			candidate := rest[:end]
-			if len(candidate) > 0 {
-				return candidate
-			}
-		}
-	}
-	// Fall back to the full name, but trim null bytes
-	return strings.TrimRight(name, "\x00")
+	return name
 }
 
 func copyFile(src, dst string) error {
