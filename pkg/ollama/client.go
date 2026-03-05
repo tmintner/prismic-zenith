@@ -118,10 +118,11 @@ func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) 
 	prompt := fmt.Sprintf("System: You are Zenith, an AI expert in system performance. "+
 		"Analyze the database results below to answer the user's question. "+
 		"Rules:\n"+
-		"1. If the results are 'NO_DATA_FOUND' or empty, you MUST say 'No data found for this query'.\n"+
-		"2. Do NOT invent names, PIDs, or values.\n"+
-		"3. Do NOT use placeholders like 'Application X'.\n"+
-		"4. Be extremely concise.\n\n"+
+		"1. If the results are 'NO_DATA_FOUND' or empty, say 'No data found for this query'.\n"+
+		"2. If results contain metrics with value 0, explain that those apps/processes showed no activity for that metric - do NOT say 'no data found'.\n"+
+		"3. Do NOT invent names, PIDs, or values.\n"+
+		"4. Do NOT use placeholders like 'Application X'.\n"+
+		"5. Be extremely concise. If all values are 0, say so clearly.\n\n"+
 		"User Query: %s\n"+
 		"SQL Executed: %s\n"+
 		"Database Results: %s\n\n"+

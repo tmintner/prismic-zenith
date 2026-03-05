@@ -345,21 +345,35 @@ func decodeUTF16HexString(s string) string {
 
 // sanitizeAppName cleans up an app name decoded from SRUM, stripping null bytes
 // and normalising device paths to use forward slashes so they are safe as
-// VictoriaMetrics label values.  Full paths are preserved so the LLM has
-// maximum context when analysing disk/CPU usage.
+// VictoriaMetrics label values.  Returns "" for obviously corrupted entries.
 func sanitizeAppName(name string) string {
 	name = strings.TrimSpace(name)
 	// Strip embedded null bytes that remain after UTF-16 decoding
 	name = strings.ReplaceAll(name, "\x00", "")
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return name
+		return ""
 	}
-	// Normalise Windows device paths: replace backslashes with forward slashes
-	// so the value is safe in Prometheus label format without extra escaping.
+
+	// Reject entries containing non-printable / binary garbage characters.
+	// Valid app names consist of printable ASCII + common Unicode path chars.
+	for _, r := range name {
+		if r < 0x20 && r != 0x09 { // control chars except tab
+			return ""
+		}
+	}
+
+	// Normalise Windows device paths: replace backslashes with forward slashes.
 	if strings.HasPrefix(name, `\`) {
 		name = strings.ReplaceAll(name, `\`, "/")
 	}
+
+	// Reject suspiciously short device paths that are clearly truncated
+	// (e.g. "/Device/" or "/Device/Har").
+	if strings.HasPrefix(name, "/Device/") && len(name) < 20 {
+		return ""
+	}
+
 	return name
 }
 

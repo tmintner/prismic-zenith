@@ -157,10 +157,11 @@ func cleanSQL(s string) string {
 func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) {
 	prompt := fmt.Sprintf("Analyze the database results below to answer the user's question.\n\n"+
 		"Rules:\n"+
-		"1. If the results are 'NO_DATA_FOUND' or empty, you MUST say 'No data found for this query'.\n"+
-		"2. Do NOT invent application names, process IDs, or numerical values.\n"+
-		"3. Do NOT use placeholder names like 'Application X' or 'Process 123'.\n"+
-		"4. Be extremely concise and focus ONLY on the data provided.\n\n"+
+		"1. If the results are 'NO_DATA_FOUND' or empty, say 'No data found for this query'.\n"+
+		"2. If results contain metrics with value 0, explain that those apps/processes showed no activity for that metric - do NOT say 'no data found'.\n"+
+		"3. Do NOT invent application names, process IDs, or numerical values.\n"+
+		"4. Do NOT use placeholder names like 'Application X' or 'Process 123'.\n"+
+		"5. Be extremely concise. If all values are 0, say so clearly.\n\n"+
 		"User Query: %s\n"+
 		"SQL/Query Executed: %s\n"+
 		"Database Results: %s\n\n"+
