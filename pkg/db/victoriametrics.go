@@ -35,13 +35,15 @@ func NewVictoriaDB(metricsURL, logsURL string) *VictoriaDB {
 }
 
 func (v *VictoriaDB) InsertMetric(name string, value float64, labels map[string]string) error {
-	// Use Influx line protocol format for simplicity
-	// measurement,tag1=val1,tag2=val2 value=123.45 timestamp
+	// Use Influx line protocol format:
+	// measurement,tag1=val1 fieldkey=123.45 timestamp
+	// Use the metric name as both the measurement AND the field key so
+	// VictoriaMetrics stores the series as `cpu_usage_pct`, not `cpu_usage_pct_value`.
 	line := fmt.Sprintf("%s", name)
 	for k, val := range labels {
 		line += fmt.Sprintf(",%s=%s", k, val)
 	}
-	line += fmt.Sprintf(" value=%f %d\n", value, time.Now().UnixNano())
+	line += fmt.Sprintf(" %s=%f %d\n", name, value, time.Now().UnixNano())
 
 	resp, err := v.Client.Post(v.MetricsURL+"/write", "text/plain", bytes.NewBufferString(line))
 	if err != nil {
