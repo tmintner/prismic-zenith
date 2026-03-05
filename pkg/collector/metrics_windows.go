@@ -21,6 +21,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
+	"golang.org/x/sys/windows"
 	"www.velocidex.com/golang/go-ese/parser"
 )
 
@@ -132,42 +133,61 @@ func collectNetworkMetrics(database *db.VictoriaDB) error {
 	return nil
 }
 
-// collectProcessIOMetrics collects per-process disk I/O counters using the
-// Windows GetProcessIoCounters API (via gopsutil). This is the same data source
-// Windows uses to build SRUM registry entries before flushing them to SRUDB.dat.
-// Running this every 5 minutes gives near-real-time disk I/O data per application.
+// collectProcessIOMetrics collects per-process disk I/O counters, duration, and
+// user identity using Windows APIs via gopsutil every 5 minutes.
 func collectProcessIOMetrics(database *db.VictoriaDB) error {
 	procs, err := process.Processes()
 	if err != nil {
 		return err
 	}
 
+	nowMs := time.Now().UnixMilli()
+
 	for _, p := range procs {
 		ioStat, err := p.IOCounters()
 		if err != nil {
-			// Skip processes we can't read (e.g. protected system processes)
-			continue
+			continue // skip processes we can't read
 		}
 
-		// Skip processes with no disk activity at all
-		if ioStat.ReadBytes == 0 && ioStat.WriteBytes == 0 {
-			continue
-		}
-
-		// Prefer the full exe path for app_name; fall back to process name
+		// Prefer full exe path; fall back to process name
 		appName, err := p.Exe()
 		if err != nil || appName == "" {
-			appName, err = p.Name()
-			if err != nil || appName == "" {
-				continue
-			}
+			appName, _ = p.Name()
 		}
-		// Normalise backslashes to forward slashes for consistency with ESE data
+		if appName == "" {
+			continue
+		}
 		appName = strings.ReplaceAll(appName, `\`, "/")
 
-		labels := map[string]string{"app_name": appName}
-		database.InsertMetric("srum_app_bytes_read_total", float64(ioStat.ReadBytes), labels)
-		database.InsertMetric("srum_app_bytes_written_total", float64(ioStat.WriteBytes), labels)
+		// Resolve username for this process
+		userName, _ := p.Username()
+		if userName == "" {
+			userName = "unknown"
+		}
+		// Strip domain prefix (DOMAIN\user → user)
+		if idx := strings.LastIndex(userName, `\`); idx >= 0 {
+			userName = userName[idx+1:]
+		}
+
+		// Compute duration from process create time
+		createMs, err := p.CreateTime()
+		var durationMs float64
+		if err == nil {
+			durationMs = float64(nowMs - createMs)
+		}
+
+		labels := map[string]string{
+			"app_name":  appName,
+			"user_name": userName,
+		}
+
+		if ioStat.ReadBytes > 0 || ioStat.WriteBytes > 0 {
+			database.InsertMetric("srum_app_bytes_read_total", float64(ioStat.ReadBytes), labels)
+			database.InsertMetric("srum_app_bytes_written_total", float64(ioStat.WriteBytes), labels)
+		}
+		if durationMs > 0 {
+			database.InsertMetric("srum_app_duration_ms", durationMs, labels)
+		}
 	}
 	return nil
 }
@@ -251,11 +271,12 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 		return fmt.Errorf("failed to read ESE catalog: %w", err)
 	}
 
-	// 4. Read SrumIdMapTable: Id (Int32) -> Value (String, the App Name)
-	idMap := make(map[int32]string)
+	// 4. Read SrumIdMapTable: split into app map (IdType=0) and user map (IdType=1)
+	appIdMap := make(map[int32]string)  // appId  → app path
+	userIdMap := make(map[int32]string) // userId → SID string
 
 	firstRowPrinted := false
-	err = catalog.DumpTable(srumIdMapTable, func(row *ordereddict.Dict) error {
+	parseSrumIdMap := func(row *ordereddict.Dict) error {
 		if !firstRowPrinted {
 			fmt.Printf("srum debug map keys: %v\n", row.Keys())
 			firstRowPrinted = true
@@ -269,6 +290,8 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 			return nil
 		}
 
+		idType, _ := getInt32FromDict(row, "IdType")
+
 		valStr, ok := row.Get("IdBlob")
 		if !ok {
 			valStr, ok = row.Get("Value")
@@ -276,75 +299,79 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 		if ok {
 			if s, ok := valStr.(string); ok {
 				name := decodeUTF16HexString(s)
-				idMap[idVal] = sanitizeAppName(name)
+				switch idType {
+				case 1: // User SID
+					userIdMap[idVal] = name
+				default: // 0 = App path
+					appIdMap[idVal] = sanitizeAppName(name)
+				}
 			}
 		}
 		return nil
-	})
+	}
+
+	err = catalog.DumpTable(srumIdMapTable, parseSrumIdMap)
 
 	if err != nil {
 		fmt.Printf("srum warning: %s not found, trying fallback %s\n", srumIdMapTable, srumIdMapTableAlt)
-		// Try alternative table name
-		err = catalog.DumpTable(srumIdMapTableAlt, func(row *ordereddict.Dict) error {
-			idVal, ok := getInt32FromDict(row, "IdIndex")
-			if !ok {
-				idVal, ok = getInt32FromDict(row, "Id")
-			}
-			if !ok {
-				return nil
-			}
-
-			valStr, ok := row.Get("IdBlob")
-			if !ok {
-				valStr, ok = row.Get("Value")
-			}
-			if ok {
-				if s, ok := valStr.(string); ok {
-					name := decodeUTF16HexString(s)
-					idMap[idVal] = sanitizeAppName(name)
-				}
-			}
-			return nil
-		})
+		err = catalog.DumpTable(srumIdMapTableAlt, parseSrumIdMap)
 		if err != nil {
 			fmt.Printf("srum warning: both %s and fallback %s not found in catalog\n", srumIdMapTable, srumIdMapTableAlt)
 		}
 	}
-	fmt.Printf("srum debug: successfully mapped %d application IDs\n", len(idMap))
+	fmt.Printf("srum debug: mapped %d app IDs, %d user IDs\n", len(appIdMap), len(userIdMap))
 
 	// 5. Read Application Resource Usage Table
-	// Limit processing to recent entries or just top consumers to avoid heavy load
 	metricsInserted := 0
 	count := 0
 	err = catalog.DumpTable(srumAppResourceTable, func(row *ordereddict.Dict) error {
 		count++
-		if count > 5000 { // Increased limit for safety
-			return io.EOF // Stop iteration
+		if count > 5000 {
+			return io.EOF
 		}
 
-		// Extract fields
 		appId, ok := getInt32FromDict(row, "AppId")
 		if !ok {
 			return nil
 		}
 
-		cycleTime, _ := getInt64FromDict(row, "CycleTime")
-		bytesRead, _ := getInt64FromDict(row, "BytesRead")
-		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
-
-		appName, exists := idMap[appId]
+		appName, exists := appIdMap[appId]
 		if !exists || appName == "" {
 			return nil
 		}
 
-		labels := map[string]string{
-			"app_name": appName,
+		// Resolve user name
+		userName := "unknown"
+		if userId, ok := getInt32FromDict(row, "UserId"); ok {
+			if sid, hasSid := userIdMap[userId]; hasSid && sid != "" {
+				userName = sidToUsername(sid)
+			}
 		}
 
-		// These are accumulating counters in SRUM, so we just report current total
+		cycleTime, _ := getInt64FromDict(row, "CycleTime")
+		fgCycleTime, _ := getInt64FromDict(row, "ForegroundCycleTime")
+		bgCycleTime, _ := getInt64FromDict(row, "BackgroundCycleTime")
+		bytesRead, _ := getInt64FromDict(row, "BytesRead")
+		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
+		durationMs, _ := getInt64FromDict(row, "DurationMS")
+
+		labels := map[string]string{
+			"app_name":  appName,
+			"user_name": userName,
+		}
+
 		database.InsertMetric("srum_app_cycle_time_total", float64(cycleTime), labels)
 		database.InsertMetric("srum_app_bytes_read_total", float64(bytesRead), labels)
 		database.InsertMetric("srum_app_bytes_written_total", float64(bytesWritten), labels)
+		if fgCycleTime > 0 {
+			database.InsertMetric("srum_app_foreground_cycle_time_total", float64(fgCycleTime), labels)
+		}
+		if bgCycleTime > 0 {
+			database.InsertMetric("srum_app_background_cycle_time_total", float64(bgCycleTime), labels)
+		}
+		if durationMs > 0 {
+			database.InsertMetric("srum_app_duration_ms", float64(durationMs), labels)
+		}
 		metricsInserted++
 		return nil
 	})
@@ -356,6 +383,25 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 	}
 
 	return nil
+}
+
+// sidToUsername resolves a Windows SID string (e.g. "S-1-5-21-...") to a
+// human-readable account name using LookupAccountSid.
+func sidToUsername(sidStr string) string {
+	sid, err := windows.StringToSid(sidStr)
+	if err != nil {
+		// SID string might actually be a decoded blob that isn't a proper SID;
+		// return the raw string trimmed of garbage.
+		return strings.TrimSpace(sidStr)
+	}
+	account, domain, _, err := sid.LookupAccount("")
+	if err != nil {
+		return sidStr
+	}
+	if domain != "" {
+		return domain + "\\" + account
+	}
+	return account
 }
 
 // decodeUTF16HexString converts a hex-encoded UTF-16LE string (as returned by

@@ -79,10 +79,10 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	prompt := fmt.Sprintf("You are Zenith, an AI expert in system performance. "+
 		"You have access to two databases:\n"+
 		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible).\n"+
-		"   System-wide metrics (NO label filter needed): cpu_usage_pct, memory_used_mb\n"+
-		"   Per-process metrics (use label `process_name`): process_cpu_pct, process_memory_mb\n"+
-		"   SRUM metrics (use label `app_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total\n"+
-		"   SRUM network metrics (NO label needed): srum_network_bytes_sent_total, srum_network_bytes_received_total\n"+
+		"   System-wide (NO label filter needed): cpu_usage_pct, memory_used_mb\n"+
+		"   Per-process (use label `process_name`): process_cpu_pct, process_memory_mb\n"+
+		"   SRUM app (use labels `app_name`, `user_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total, srum_app_duration_ms, srum_app_foreground_cycle_time_total, srum_app_background_cycle_time_total\n"+
+		"   SRUM network (NO label needed): srum_network_bytes_sent_total, srum_network_bytes_received_total\n"+
 		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage.\n\n"+
 		"Based on the user query, provide EXACTLY ONE database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n"+
 		"Rules for Queries:\n"+

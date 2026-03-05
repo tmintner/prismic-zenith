@@ -54,7 +54,7 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"Metrics (VictoriaMetrics - MetricsQL):\n"+
 		"- System-wide (NO label filter needed): cpu_usage_pct, memory_used_mb\n"+
 		"- Per-process (use label `process_name`): process_cpu_pct, process_memory_mb\n"+
-		"- SRUM app (use label `app_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total\n"+
+		"- SRUM app (use labels `app_name`, `user_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total, srum_app_duration_ms, srum_app_foreground_cycle_time_total, srum_app_background_cycle_time_total\n"+
 		"- SRUM network (NO label needed): srum_network_bytes_sent_total, srum_network_bytes_received_total\n\n"+
 		"Logs (VictoriaLogs - LogsQL):\n"+
 		"- Fields: processName, subsystem, category, messageType, eventMessage\n"+
