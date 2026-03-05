@@ -75,6 +75,9 @@ func (v *VictoriaDB) QueryMetrics(query string) (string, error) {
 	}
 	q := u.Query()
 	q.Set("query", query)
+	// step=600 extends the lookback window to 10 minutes so metrics written
+	// every 5 minutes (e.g. SRUM) are always found between collection cycles.
+	q.Set("step", "600")
 	u.RawQuery = q.Encode()
 
 	resp, err := v.Client.Get(u.String())
