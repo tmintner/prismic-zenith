@@ -52,30 +52,26 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	prompt := fmt.Sprintf("Based on the following user query, provide ONLY ONE database query prefixed with 'METRIC:' or 'LOG:'.\n\n"+
 		"Metrics (VictoriaMetrics - MetricsQL):\n"+
-		"- cpu_usage_pct (labels: host)\n"+
-		"- memory_used_mb (labels: host)\n"+
-		"- process_cpu_pct (labels: pid, process_name)\n"+
-		"- process_memory_mb (labels: pid, process_name)\n"+
-		"- srum_network_bytes_sent_total (labels: interface)\n"+
-		"- srum_network_bytes_received_total (labels: interface)\n"+
-		"- srum_app_cycle_time_total (labels: app_name)\n"+
-		"- srum_app_bytes_read_total (labels: app_name)\n"+
-		"- srum_app_bytes_written_total (labels: app_name)\n\n"+
+		"- System-wide (NO label filter needed): cpu_usage_pct, memory_used_mb\n"+
+		"- Per-process (use label `process_name`): process_cpu_pct, process_memory_mb\n"+
+		"- SRUM app (use label `app_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total\n"+
+		"- SRUM network (NO label needed): srum_network_bytes_sent_total, srum_network_bytes_received_total\n\n"+
 		"Logs (VictoriaLogs - LogsQL):\n"+
 		"- Fields: processName, subsystem, category, messageType, eventMessage\n"+
-		"- Syntaxes: `field:value`, `field:\"exact string\"`, `field:~\"regex\"` \n"+
-		"- Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
+		"- Syntax: `field:value` or `field:\"exact string\"`\n\n"+
 		"Rules:\n"+
-		"1. Return ONLY ONE line. Do NOT truncate the query or cut off metric names (e.g. output `srum_network_bytes_sent_total`, NOT `srum_net`).\n"+
-		"2. NEVER combine metrics and logs in the same query. Choose ONE.\n"+
-		"3. SRUM data (network, disk, cycle time) is exclusively stored as METRICS, never as LOGS.\n"+
-		"4. NEVER compare metrics to strings (e.g. `metric == \"\"`). To check for existence, simply query the metric name (e.g., `srum_app_bytes_read_total > 0`).\n"+
-		"5. For SRUM app metrics, use the label `app_name`.\n"+
-		"6. MetricsQL uses lowercase logical operators: `and`, `or`, `unless` (NEVER `AND`/`OR`).\n"+
-		"7. LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n"+
-		"8. LogsQL uses uppercase logical operators: `AND`, `OR`.\n"+
-		"9. For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n"+
-		"Example MetricsQL: `METRIC:srum_network_bytes_sent_total > 0 or srum_network_bytes_received_total > 0`\n"+
+		"1. Return ONLY ONE line. Do NOT truncate metric names.\n"+
+		"2. NEVER add a label filter unless the user asks about a specific app or process.\n"+
+		"3. NEVER use placeholder label values like 'your_process_name'. Omit the label entirely.\n"+
+		"4. NEVER combine metrics and logs in the same query. Choose ONE.\n"+
+		"5. SRUM data is exclusively METRICS, never LOGS.\n"+
+		"6. NEVER compare metrics to strings. To check for existence, use `metric_name > 0`.\n"+
+		"7. MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
+		"8. LogsQL uses `:` for equality (NEVER `=` or `==`) and uppercase `AND`/`OR`.\n"+
+		"9. For arithmetic, do NOT repeat the prefix.\n\n"+
+		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
+		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
+		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+
 		"Example 'Any SRUM data': `METRIC:srum_app_bytes_read_total > 0`\n"+
 		"Example LogsQL: `LOG:eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\nResponse:", userQuery)
