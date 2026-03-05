@@ -3,6 +3,7 @@
 package collector
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"zenith/pkg/db"
 
@@ -224,7 +226,8 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 		}
 		if ok {
 			if s, ok := valStr.(string); ok {
-				idMap[idVal] = s
+				name := decodeUTF16HexString(s)
+				idMap[idVal] = sanitizeAppName(name)
 			}
 		}
 		return nil
@@ -248,7 +251,8 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 			}
 			if ok {
 				if s, ok := valStr.(string); ok {
-					idMap[idVal] = s
+					name := decodeUTF16HexString(s)
+					idMap[idVal] = sanitizeAppName(name)
 				}
 			}
 			return nil
@@ -305,7 +309,62 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 	return nil
 }
 
-// copyFile is a helper to copy a file
+// decodeUTF16HexString converts a hex-encoded UTF-16LE string (as returned by
+// go-ese for Long Binary columns in SRUDB.dat) to a regular UTF-8 Go string.
+// If the input is not valid hex or UTF-16LE, the raw input is returned as-is.
+func decodeUTF16HexString(s string) string {
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) < 2 {
+		return s // not hex-encoded, return raw
+	}
+	// Interpret as little-endian UTF-16 pairs
+	u16 := make([]uint16, len(b)/2)
+	for i := range u16 {
+		u16[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+	}
+	// Trim null terminators
+	for len(u16) > 0 && u16[len(u16)-1] == 0 {
+		u16 = u16[:len(u16)-1]
+	}
+	if len(u16) == 0 {
+		return s
+	}
+	return string(utf16.Decode(u16))
+}
+
+// sanitizeAppName extracts a human-readable app name from a full device path or
+// package name.  For example:
+//   - `\Device\HarddiskVolume3\Windows\System32\csrss.exe` -> `csrss.exe`
+//   - `Microsoft.WindowsTerminal_1.22.11141.0_arm64__8wekyb3d8bbwe` -> `WindowsTerminal`
+func sanitizeAppName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return name
+	}
+	// Device paths: grab the basename
+	if strings.HasPrefix(name, `\Device\`) || strings.HasPrefix(name, `\`) {
+		base := filepath.Base(name)
+		// Strip any trailing null chars that survived
+		base = strings.TrimRight(base, "\x00")
+		if base != "" && base != "." {
+			return base
+		}
+	}
+	// Windows Store package IDs: `Publisher.AppName_Version_arch__hash`
+	// Try to extract just the short AppName part (second dot-delimited segment)
+	if idx := strings.Index(name, "."); idx != -1 {
+		rest := name[idx+1:]
+		if end := strings.IndexAny(rest, "_.!"); end != -1 {
+			candidate := rest[:end]
+			if len(candidate) > 0 {
+				return candidate
+			}
+		}
+	}
+	// Fall back to the full name, but trim null bytes
+	return strings.TrimRight(name, "\x00")
+}
+
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {
