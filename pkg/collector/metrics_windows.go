@@ -25,25 +25,36 @@ import (
 )
 
 func CollectMetrics(database *db.VictoriaDB) error {
-	if err := collectCPUMetrics(database); err != nil {
-		fmt.Printf("failed to collect CPU metrics: %v\n", err)
+	type result struct {
+		name string
+		err  error
 	}
 
-	if err := collectMemoryMetrics(database); err != nil {
-		fmt.Printf("failed to collect memory metrics: %v\n", err)
+	collectors := []struct {
+		name string
+		fn   func(*db.VictoriaDB) error
+	}{
+		{"CPU", collectCPUMetrics},
+		{"Memory", collectMemoryMetrics},
+		{"Process", CollectProcessMetrics},
+		{"Network", collectNetworkMetrics},
+		{"SRUM", CollectSrumHistoricalMetrics},
 	}
 
-	if err := CollectProcessMetrics(database); err != nil {
-		fmt.Printf("failed to collect process metrics: %v\n", err)
+	results := make(chan result, len(collectors))
+
+	for _, c := range collectors {
+		c := c // capture loop variable
+		go func() {
+			results <- result{c.name, c.fn(database)}
+		}()
 	}
 
-	if err := collectNetworkMetrics(database); err != nil {
-		fmt.Printf("failed to collect network metrics: %v\n", err)
-	}
-
-	// SRUM is heavy, maybe run it less frequently or just catch errors without spamming
-	if err := CollectSrumHistoricalMetrics(database); err != nil {
-		fmt.Printf("failed to collect SRUM historical metrics: %v\n", err)
+	for range collectors {
+		r := <-results
+		if r.err != nil {
+			fmt.Printf("failed to collect %s metrics: %v\n", r.name, r.err)
+		}
 	}
 
 	return nil
