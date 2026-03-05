@@ -94,6 +94,7 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- LogsQL uses uppercase logical operators: `AND`, `OR`.\n"+
 		"- For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n\n"+
 		"Example MetricsQL: `METRIC:srum_network_bytes_sent_total > 0 or srum_network_bytes_received_total > 0`\n"+
+		"Example 'Any SRUM data': `METRIC:srum_app_bytes_read_total > 0`\n"+
 		"Example LogsQL: `LOG:eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\n"+
 		"Response:", userQuery)
