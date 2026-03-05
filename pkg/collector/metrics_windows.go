@@ -38,6 +38,7 @@ func CollectMetrics(database *db.VictoriaDB) error {
 		{"Memory", collectMemoryMetrics},
 		{"Process", CollectProcessMetrics},
 		{"Network", collectNetworkMetrics},
+		{"ProcessIO", collectProcessIOMetrics},
 	}
 
 	results := make(chan result, len(collectors))
@@ -131,7 +132,45 @@ func collectNetworkMetrics(database *db.VictoriaDB) error {
 	return nil
 }
 
-// SRUM Collection Implementation
+// collectProcessIOMetrics collects per-process disk I/O counters using the
+// Windows GetProcessIoCounters API (via gopsutil). This is the same data source
+// Windows uses to build SRUM registry entries before flushing them to SRUDB.dat.
+// Running this every 5 minutes gives near-real-time disk I/O data per application.
+func collectProcessIOMetrics(database *db.VictoriaDB) error {
+	procs, err := process.Processes()
+	if err != nil {
+		return err
+	}
+
+	for _, p := range procs {
+		ioStat, err := p.IOCounters()
+		if err != nil {
+			// Skip processes we can't read (e.g. protected system processes)
+			continue
+		}
+
+		// Skip processes with no disk activity at all
+		if ioStat.ReadBytes == 0 && ioStat.WriteBytes == 0 {
+			continue
+		}
+
+		// Prefer the full exe path for app_name; fall back to process name
+		appName, err := p.Exe()
+		if err != nil || appName == "" {
+			appName, err = p.Name()
+			if err != nil || appName == "" {
+				continue
+			}
+		}
+		// Normalise backslashes to forward slashes for consistency with ESE data
+		appName = strings.ReplaceAll(appName, `\`, "/")
+
+		labels := map[string]string{"app_name": appName}
+		database.InsertMetric("srum_app_bytes_read_total", float64(ioStat.ReadBytes), labels)
+		database.InsertMetric("srum_app_bytes_written_total", float64(ioStat.WriteBytes), labels)
+	}
+	return nil
+}
 
 const (
 	srumDbPath           = "C:\\Windows\\System32\\sru\\SRUDB.dat"
