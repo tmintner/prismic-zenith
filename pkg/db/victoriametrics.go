@@ -103,10 +103,31 @@ func (v *VictoriaDB) QueryMetrics(query string) (string, error) {
 		return "", err
 	}
 
-	// Simple serialization for LLM
+	// Format results in a clean, LLM-readable way
 	var out bytes.Buffer
 	for _, res := range result.Data.Result {
-		fmt.Fprintf(&out, "Metric: %v, Value: %v\n", res.Metric, res.Value)
+		// Extract the numeric value (index 1 of the [timestamp, value] pair)
+		val := ""
+		if len(res.Value) >= 2 {
+			val = fmt.Sprintf("%v", res.Value[1])
+		}
+
+		// Build a label description; omit __name__ since we print query context elsewhere
+		var labelParts []string
+		for k, v := range res.Metric {
+			if k != "__name__" {
+				labelParts = append(labelParts, fmt.Sprintf("%s=%q", k, v))
+			}
+		}
+		name := res.Metric["__name__"]
+		if name == "" {
+			name = "result"
+		}
+		if len(labelParts) > 0 {
+			fmt.Fprintf(&out, "%s{%s}: %s\n", name, strings.Join(labelParts, ", "), val)
+		} else {
+			fmt.Fprintf(&out, "%s: %s\n", name, val)
+		}
 	}
 
 	return out.String(), nil
