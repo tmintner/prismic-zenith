@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -35,17 +36,25 @@ func NewVictoriaDB(metricsURL, logsURL string) *VictoriaDB {
 }
 
 func (v *VictoriaDB) InsertMetric(name string, value float64, labels map[string]string) error {
-	// Use Influx line protocol format:
-	// measurement,tag1=val1 fieldkey=123.45 timestamp
-	// Use the metric name as both the measurement AND the field key so
-	// VictoriaMetrics stores the series as `cpu_usage_pct`, not `cpu_usage_pct_value`.
-	line := fmt.Sprintf("%s", name)
-	for k, val := range labels {
-		line += fmt.Sprintf(",%s=%s", k, val)
-	}
-	line += fmt.Sprintf(" %s=%f %d\n", name, value, time.Now().UnixNano())
+	// Use Prometheus exposition format via /api/v1/import/prometheus.
+	// This stores the metric with exactly the name given, no suffix or doubling.
+	// Format: metric_name{label1="val1",label2="val2"} value timestamp_ms
 
-	resp, err := v.Client.Post(v.MetricsURL+"/write", "text/plain", bytes.NewBufferString(line))
+	var labelParts []string
+	for k, val := range labels {
+		// Escape backslashes and double-quotes inside label values
+		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(val)
+		labelParts = append(labelParts, fmt.Sprintf(`%s="%s"`, k, escaped))
+	}
+
+	var line string
+	if len(labelParts) > 0 {
+		line = fmt.Sprintf("%s{%s} %f %d\n", name, strings.Join(labelParts, ","), value, time.Now().UnixMilli())
+	} else {
+		line = fmt.Sprintf("%s %f %d\n", name, value, time.Now().UnixMilli())
+	}
+
+	resp, err := v.Client.Post(v.MetricsURL+"/api/v1/import/prometheus", "text/plain", bytes.NewBufferString(line))
 	if err != nil {
 		return err
 	}
