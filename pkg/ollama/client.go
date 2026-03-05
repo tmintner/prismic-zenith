@@ -100,6 +100,8 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
 		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+
 		"Example 'Any SRUM data': `METRIC:srum_app_bytes_read_total > 0`\n"+
+		"Example 'Most disk IO apps': `METRIC:topk(10, srum_app_bytes_written_total)`\n"+
+		"Example 'Most CPU apps (SRUM)': `METRIC:topk(10, srum_app_cycle_time_total)`\n"+
 		"Example LogsQL: `LOG:eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\n"+
 		"Response:", userQuery)
