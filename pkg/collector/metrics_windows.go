@@ -38,7 +38,6 @@ func CollectMetrics(database *db.VictoriaDB) error {
 		{"Memory", collectMemoryMetrics},
 		{"Process", CollectProcessMetrics},
 		{"Network", collectNetworkMetrics},
-		{"SRUM", CollectSrumHistoricalMetrics},
 	}
 
 	results := make(chan result, len(collectors))
