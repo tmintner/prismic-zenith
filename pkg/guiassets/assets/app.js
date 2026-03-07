@@ -22,7 +22,7 @@ async function initGreeting() {
 // --- Metrics ---
 function startMetricsLoop() {
   refreshMetrics();
-  metricsInterval = setInterval(refreshMetrics, 10000);
+  metricsInterval = setInterval(refreshMetrics, 30000);
 }
 
 async function refreshMetrics() {
@@ -87,7 +87,7 @@ function renderProcessTable(tbodyId, processes, type) {
   tbody.innerHTML = processes.map(p => {
     const val = type === 'cpu'
       ? parseFloat(p.value).toFixed(1) + '%'
-      : (parseFloat(p.value) / (1024 * 1024)).toFixed(0) + ' MB';
+      : parseFloat(p.value).toFixed(0) + ' MB';
     return `<tr><td title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td><td>${val}</td></tr>`;
   }).join('');
 }

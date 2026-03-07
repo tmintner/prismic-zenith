@@ -53,12 +53,12 @@ func LoadConfig(path string) (*Config, error) {
 		LogsBin:         logsBin,
 		MetricsData:     "./vm-data",
 		LogsData:        "./vlogs-data",
-		LLMProvider:     "ollama",
-		OllamaModel:     "phi4-mini",
+		LLMProvider:     "llamacpp",
+		OllamaModel:     "qwen2.5-coder:7b",
 		LlamaCppHost:    "localhost",
 		LlamaCppPort:    8080,
 		LlamaCppBin:     llamaBin,
-		LlamaCppModel:   "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
+		LlamaCppModel:   "./models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
 		CollectInterval: "5m",
 	}
 

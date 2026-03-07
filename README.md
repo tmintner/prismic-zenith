@@ -11,7 +11,7 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 - **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini, Ollama, or a built-in `llama.cpp` integration.
 - **System Recommendations**: Proactively analyzes system health (CPU, Memory, error logs) to provide actionable optimization tips.
 - **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
-- **Zero-Setup AI**: The `llama.cpp` provider automatically downloads a default model (Phi-4-mini) on first run if you don't provide your own, allowing for immediate offline analysis without complex setup.
+- **Zero-Setup AI**: The `llama.cpp` provider automatically downloads a default model (Qwen2.5-Coder-7B) on first run if you don't provide your own, allowing for immediate offline analysis without complex setup.
 - **Desktop GUI**: Native webview window with live CPU/memory gauges, top-process tables, and an AI chat interface.
 - **Configurable**: Fully manageable via `config.json` or environment variables.
 
@@ -56,18 +56,18 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
     "metrics_data": "./vm-data",
     "logs_data": "./vlogs-data",
     "llm_provider": "llamacpp",
-    "ollama_model": "phi4-mini",
+    "ollama_model": "qwen2.5-coder:7b",
     "llamacpp_host": "localhost",
     "llamacpp_port": 8080,
     "llamacpp_bin": "llama-server",
-    "llamacpp_model": "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
+    "llamacpp_model": "./models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
 }
 ```
 
 > [!TIP]
-> If you set `"llm_provider": "llamacpp"` and leave the `llamacpp_model` field empty or pointing to a non-existent file, Zenith will automatically download the Phi-4-mini 3.8B model on its first startup.
+> If you set `"llm_provider": "llamacpp"` and leave the `llamacpp_model` field empty or pointing to a non-existent file, Zenith will automatically download the Qwen2.5-Coder-7B model on its first startup.
 
 > [!TIP]
 > You can also set `GEMINI_API_KEY` as an environment variable to avoid storing it in plain text.

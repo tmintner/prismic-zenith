@@ -95,7 +95,8 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- MetricsQL regex uses `=~`, e.g., `process_cpu_pct{process_name=~\"(?i)ollama\"}`.\n"+
 		"- MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
 		"- LogsQL uses `:` for equality, NEVER `=` or `==`.\n"+
-		"- LogsQL uses uppercase logical operators: `AND`, `OR`.\n\n"+
+		"- LogsQL uses uppercase logical operators: `AND`, `OR`.\n"+
+		"- NEVER use square brackets `[]` for filters or grouping in LogsQL.\n\n"+
 		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
 		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
 		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+

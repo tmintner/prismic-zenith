@@ -11,12 +11,12 @@
     "logs_bin": "/opt/homebrew/bin/victoria-logs",
     "metrics_data": "./vm-data",
     "logs_data": "./vlogs-data",
-    "llm_provider": "ollama",
-    "ollama_model": "phi4-mini",
+    "llm_provider": "llamacpp",
+    "ollama_model": "qwen2.5-coder:7b",
     "llamacpp_host": "localhost",
     "llamacpp_port": 8080,
     "llamacpp_bin": "llama-server",
-    "llamacpp_model": "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
+    "llamacpp_model": "./models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "collect_interval": "5m",
     "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE"
 }

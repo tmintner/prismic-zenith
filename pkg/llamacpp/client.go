@@ -89,7 +89,7 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	systemPrompt := "You are Zenith, an AI expert in system performance. " +
 		"You have access to two databases:\n" +
 		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'process_cpu_pct', 'process_memory_mb', 'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'.\n" +
-		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage.\n\n" +
+		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage. NEVER use square brackets `[]` in LogsQL filters.\n\n" +
 		"Based on the user query, provide EXACTLY ONE database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n" +
 		"Rules for Queries:\n" +
 		"- Return ONLY ONE line. Multi-line responses will fail.\n" +
@@ -100,6 +100,7 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- MetricsQL regex uses `=~`, e.g., `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n" +
 		"- LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n" +
 		"- LogsQL uses `AND`/`OR` for logic, NEVER `,` or `|`.\n" +
+		"- NEVER use square brackets `[]` for filters or grouping in LogsQL.\n" +
 		"- For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n\n" +
 		"Example MetricsQL: `avg(cpu_usage_pct)`, `srum_network_bytes_sent_total > 0`\n" +
 		"Example LogsQL: `eventMessage:\"error\" AND processName:\"wifid\"`"

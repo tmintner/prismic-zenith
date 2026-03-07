@@ -34,7 +34,8 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 				"'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'. " +
 				"Query this using MetricsQL (PromQL-compatible).\n" +
 				"2. VictoriaLogs (Logs): Use this for event logs (Windows Event Log, console messages). " +
-				"Query using LogsQL (Syntax: `field:value` or `field:\"value\"`). Fields: 'processName', 'subsystem', 'category', 'messageType', 'eventMessage'.\n\n" +
+				"Query using LogsQL (Syntax: `field:value` or `field:\"value\"`). Fields: 'processName', 'subsystem', 'category', 'messageType', 'eventMessage'. " +
+				"NEVER use square brackets `[]` in LogsQL filters.\n\n" +
 				"Your goal is to translate natural language questions into EXACTLY ONE appropriate query, " +
 				"prefixed with either 'METRIC:' or 'LOG:'. " +
 				"Do NOT return multiple lines or multiple queries. " +
@@ -68,7 +69,8 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"6. NEVER compare metrics to strings. To check for existence, use `metric_name > 0`.\n"+
 		"7. MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
 		"8. LogsQL uses `:` for equality (NEVER `=` or `==`) and uppercase `AND`/`OR`.\n"+
-		"9. For arithmetic, do NOT repeat the prefix.\n\n"+
+		"9. NEVER use square brackets `[]` for filters or grouping in LogsQL.\n"+
+		"10. For arithmetic, do NOT repeat the prefix.\n\n"+
 		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
 		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
 		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+

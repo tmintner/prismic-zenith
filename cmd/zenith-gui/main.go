@@ -59,7 +59,7 @@ func main() {
 		result := map[string]interface{}{}
 
 		// CPU usage
-		cpuResult, err := victoria.QueryMetrics("system_cpu_usage_percent")
+		cpuResult, err := victoria.QueryMetrics("cpu_usage_pct")
 		if err != nil {
 			result["error"] = err.Error()
 			return result
@@ -67,17 +67,17 @@ func main() {
 		result["cpu_pct"] = parseFirstValue(cpuResult)
 
 		// Memory
-		memUsed, _ := victoria.QueryMetrics("system_memory_used_bytes")
-		memFree, _ := victoria.QueryMetrics("system_memory_free_bytes")
-		result["mem_used_mb"] = parseFirstValueBytes(memUsed)
-		result["mem_free_mb"] = parseFirstValueBytes(memFree)
+		memUsed, _ := victoria.QueryMetrics("memory_used_mb")
+		memFree, _ := victoria.QueryMetrics("memory_free_mb")
+		result["mem_used_mb"] = parseFirstValue(memUsed)
+		result["mem_free_mb"] = parseFirstValue(memFree)
 
 		// Top processes by CPU
-		topCPU, _ := victoria.QueryMetrics("topk(5, process_cpu_usage_percent)")
+		topCPU, _ := victoria.QueryMetrics("topk(5, process_cpu_pct)")
 		result["top_cpu"] = parseProcessResults(topCPU)
 
 		// Top processes by memory
-		topMem, _ := victoria.QueryMetrics("topk(5, process_memory_rss_bytes)")
+		topMem, _ := victoria.QueryMetrics("topk(5, process_memory_mb)")
 		result["top_mem"] = parseProcessResults(topMem)
 
 		return result
