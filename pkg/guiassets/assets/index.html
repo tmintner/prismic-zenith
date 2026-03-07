@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zenith System Monitor</title>
+  <style>/* INJECT_CSS */</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">
+        <div class="icon"></div>
+        <span>Zenith</span>
+      </div>
+      <span id="greeting"></span>
+      <div class="status">
+        <div class="dot"></div>
+        <span>Server</span>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- Dashboard -->
+      <div class="dashboard">
+        <div class="card">
+          <h3>System Overview</h3>
+          <div class="gauges">
+            <div class="gauge">
+              <div class="gauge-ring">
+                <svg viewBox="0 0 100 100">
+                  <circle class="track" />
+                  <circle class="fill" id="cpu-arc" />
+                </svg>
+                <div class="gauge-value" id="cpu-value">--</div>
+              </div>
+              <div class="gauge-label">CPU</div>
+            </div>
+            <div class="gauge">
+              <div class="gauge-ring">
+                <svg viewBox="0 0 100 100">
+                  <circle class="track" />
+                  <circle class="fill" id="mem-arc" />
+                </svg>
+                <div class="gauge-value" id="mem-value">--</div>
+              </div>
+              <div class="gauge-label">Memory</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Top Processes (CPU)</h3>
+          <table class="proc-table">
+            <thead>
+              <tr><th>Process</th><th>CPU</th></tr>
+            </thead>
+            <tbody id="top-cpu-body">
+              <tr><td colspan="2" class="no-data">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h3>Top Processes (Memory)</h3>
+          <table class="proc-table">
+            <thead>
+              <tr><th>Process</th><th>RSS</th></tr>
+            </thead>
+            <tbody id="top-mem-body">
+              <tr><td colspan="2" class="no-data">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chat -->
+      <div class="chat">
+        <div class="chat-messages" id="chat-messages">
+          <div class="welcome">
+            <h2>Zenith AI Assistant</h2>
+            <p>Ask a question about your system performance, or get recommendations.</p>
+          </div>
+        </div>
+        <div class="chat-input">
+          <input type="text" id="chat-input" placeholder="Ask about system performance..." autocomplete="off" />
+          <button id="btn-send">Send</button>
+          <button id="btn-recommend" class="btn-recommend">Recommend</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>/* INJECT_JS */</script>
+</body>
+</html>

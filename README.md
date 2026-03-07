@@ -11,13 +11,15 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 - **AI-Driven Analysis**: Translates natural language questions into MetricsQL (for metrics) or LogSQL (for logs) using Google Gemini or Ollama.
 - **System Recommendations**: Proactively analyzes system health (CPU, Memory, error logs) to provide actionable optimization tips.
 - **High-Performance Storage**: Uses **VictoriaMetrics** for metrics and **VictoriaLogs** for log entries.
+- **Desktop GUI**: Native webview window with live CPU/memory gauges, top-process tables, and an AI chat interface.
 - **Configurable**: Fully manageable via `config.json` or environment variables.
 
 ## Components
 
 1.  **Zenith Server (`zenith-server`)**: The background daemon responsible for data collection and exposing the query API.
 2.  **Zenith CLI (`zenith-cli`)**: A command-line tool to query the system state.
-3.  **VictoriaMetrics & VictoriaLogs**: The backend databases for storing system data.
+3.  **Zenith GUI (`zenith-gui`)**: A desktop application with a live dashboard and AI chat interface.
+4.  **VictoriaMetrics & VictoriaLogs**: The backend databases for storing system data.
 
 ---
 
@@ -26,12 +28,13 @@ Zenith is a cross-platform (macOS/Windows) AI agent that monitors your system an
 ### 1. Prerequisites
 
 - **Go 1.24+**: Required for building from source.
-- **CGO**: Required for macOS builds to interface with the System Log API.
+- **CGO**: Required for macOS builds to interface with the System Log API and the GUI's WebKit backend.
 
 > [!IMPORTANT]
-> macOS builds now require `CGO_ENABLED=1` (default on native builds) to support unified logging without shell commands.
+> macOS builds require `CGO_ENABLED=1` (default on native builds) to support unified logging and the webview GUI.
 - **VictoriaMetrics**: [Download](https://victoriametrics.com/limited-binaries/) or install via Homebrew: `brew install victoria-metrics`.
 - **VictoriaLogs**: [Download](https://docs.victoriametrics.com/victorialogs/) or install via Homebrew: `brew install victoria-logs`.
+- **Windows (GUI only)**: Edge WebView2 runtime — pre-installed on Windows 10 1803+ and Windows 11.
 
 ### 2. Configuration
 
@@ -66,13 +69,19 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
 Using the provided Makefile is the easiest way to build for your platform:
 
 ```bash
-# Build for current host platform (macOS/Windows)
-make
-
-# Build for specific platforms
+# Build all three binaries for macOS (server, CLI, GUI)
 make build-mac
+
+# Build all three binaries for Windows
 make build-windows
+
+# Build individual targets
+make build-server-mac
+make build-cli-mac
+make build-gui-mac
 ```
+
+Binaries are written to `bin/`.
 
 ---
 
@@ -96,7 +105,20 @@ victoria-logs -storageDataPath ./vlogs-data -httpListenAddr :9428
 ./bin/zenith-server
 ```
 
-### 3. Query via CLI
+### 3. Open the GUI
+
+```bash
+./bin/zenith-gui
+```
+
+The window shows:
+- **Live dashboard** — CPU and memory gauges updated every 10 seconds, plus top-5 processes by CPU and memory.
+- **AI chat** — type any natural language question and press Send. Thumbs-up/down buttons on each response send feedback back to the server.
+- **Recommendations** — click the Recommend button for a proactive health analysis.
+
+The GUI requires `zenith-server` to be running first. If the server is unreachable, it displays a connection error in the chat area rather than crashing.
+
+### 4. Query via CLI
 
 Use the CLI to ask questions about your system.
 
@@ -111,7 +133,7 @@ Use the CLI to ask questions about your system.
 ./bin/zenith-cli http://192.168.1.5:8080 recommend
 ```
 
-### 4. System Recommendations
+### 5. System Recommendations
 
 Zenith can proactively analyze your system's metrics and logs to provide recommendations.
 
