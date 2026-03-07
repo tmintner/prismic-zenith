@@ -21,6 +21,10 @@ type Config struct {
 	LogsData        string `json:"logs_data"`
 	LLMProvider     string `json:"llm_provider"`
 	OllamaModel     string `json:"ollama_model"`
+	LlamaCppHost    string `json:"llamacpp_host"`
+	LlamaCppPort    int    `json:"llamacpp_port"`
+	LlamaCppBin     string `json:"llamacpp_bin"`
+	LlamaCppModel   string `json:"llamacpp_model"`
 	CollectInterval string `json:"collect_interval"`
 	GeminiAPIKey    string `json:"gemini_api_key"`
 }
@@ -29,9 +33,11 @@ func LoadConfig(path string) (*Config, error) {
 	// Defaults based on OS
 	metricsBin := "/opt/homebrew/bin/victoria-metrics"
 	logsBin := "/opt/homebrew/bin/victoria-logs"
+	llamaBin := "llama-server"
 	if runtime.GOOS == "windows" {
 		metricsBin = "victoria-metrics.exe"
 		logsBin = "victoria-logs.exe"
+		llamaBin = "llama-server.exe"
 	}
 
 	cfg := &Config{
@@ -49,6 +55,10 @@ func LoadConfig(path string) (*Config, error) {
 		LogsData:        "./vlogs-data",
 		LLMProvider:     "ollama",
 		OllamaModel:     "phi4-mini",
+		LlamaCppHost:    "localhost",
+		LlamaCppPort:    8080,
+		LlamaCppBin:     llamaBin,
+		LlamaCppModel:   "./models/Phi-4-mini-instruct-Q4_K_M.gguf",
 		CollectInterval: "5m",
 	}
 

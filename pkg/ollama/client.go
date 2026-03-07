@@ -30,7 +30,7 @@ type GenerateResponse struct {
 
 func NewClient(baseURL, model string) *Client {
 	if model == "" {
-		model = "phi4-mini" // Default model
+		model = "qwen2.5-coder:7b" // Default model
 	}
 
 	return &Client{
