@@ -88,3 +88,9 @@ func CollectProcessMetrics(database *db.VictoriaDB) error {
 	}
 	return nil
 }
+
+// CollectSrumHistoricalMetrics is a no-op on non-Windows platforms.
+// SRUM is a Windows-only data source.
+func CollectSrumHistoricalMetrics(database *db.VictoriaDB) error {
+	return nil
+}

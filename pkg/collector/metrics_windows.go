@@ -3,6 +3,7 @@
 package collector
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"zenith/pkg/db"
 
@@ -19,29 +21,41 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
+	"golang.org/x/sys/windows"
 	"www.velocidex.com/golang/go-ese/parser"
 )
 
 func CollectMetrics(database *db.VictoriaDB) error {
-	if err := collectCPUMetrics(database); err != nil {
-		fmt.Printf("failed to collect CPU metrics: %v\n", err)
+	type result struct {
+		name string
+		err  error
 	}
 
-	if err := collectMemoryMetrics(database); err != nil {
-		fmt.Printf("failed to collect memory metrics: %v\n", err)
+	collectors := []struct {
+		name string
+		fn   func(*db.VictoriaDB) error
+	}{
+		{"CPU", collectCPUMetrics},
+		{"Memory", collectMemoryMetrics},
+		{"Process", CollectProcessMetrics},
+		{"Network", collectNetworkMetrics},
+		{"ProcessIO", collectProcessIOMetrics},
 	}
 
-	if err := CollectProcessMetrics(database); err != nil {
-		fmt.Printf("failed to collect process metrics: %v\n", err)
+	results := make(chan result, len(collectors))
+
+	for _, c := range collectors {
+		c := c // capture loop variable
+		go func() {
+			results <- result{c.name, c.fn(database)}
+		}()
 	}
 
-	if err := collectNetworkMetrics(database); err != nil {
-		fmt.Printf("failed to collect network metrics: %v\n", err)
-	}
-
-	// SRUM is heavy, maybe run it less frequently or just catch errors without spamming
-	if err := CollectSrumHistoricalMetrics(database); err != nil {
-		fmt.Printf("failed to collect SRUM historical metrics: %v\n", err)
+	for range collectors {
+		r := <-results
+		if r.err != nil {
+			fmt.Printf("failed to collect %s metrics: %v\n", r.name, r.err)
+		}
 	}
 
 	return nil
@@ -119,7 +133,64 @@ func collectNetworkMetrics(database *db.VictoriaDB) error {
 	return nil
 }
 
-// SRUM Collection Implementation
+// collectProcessIOMetrics collects per-process disk I/O counters, duration, and
+// user identity using Windows APIs via gopsutil every 5 minutes.
+func collectProcessIOMetrics(database *db.VictoriaDB) error {
+	procs, err := process.Processes()
+	if err != nil {
+		return err
+	}
+
+	nowMs := time.Now().UnixMilli()
+
+	for _, p := range procs {
+		ioStat, err := p.IOCounters()
+		if err != nil {
+			continue // skip processes we can't read
+		}
+
+		// Prefer full exe path; fall back to process name
+		appName, err := p.Exe()
+		if err != nil || appName == "" {
+			appName, _ = p.Name()
+		}
+		if appName == "" {
+			continue
+		}
+		appName = strings.ReplaceAll(appName, `\`, "/")
+
+		// Resolve username for this process
+		userName, _ := p.Username()
+		if userName == "" {
+			userName = "unknown"
+		}
+		// Strip domain prefix (DOMAIN\user → user)
+		if idx := strings.LastIndex(userName, `\`); idx >= 0 {
+			userName = userName[idx+1:]
+		}
+
+		// Compute duration from process create time
+		createMs, err := p.CreateTime()
+		var durationMs float64
+		if err == nil {
+			durationMs = float64(nowMs - createMs)
+		}
+
+		labels := map[string]string{
+			"app_name":  appName,
+			"user_name": userName,
+		}
+
+		if ioStat.ReadBytes > 0 || ioStat.WriteBytes > 0 {
+			database.InsertMetric("srum_app_bytes_read_total", float64(ioStat.ReadBytes), labels)
+			database.InsertMetric("srum_app_bytes_written_total", float64(ioStat.WriteBytes), labels)
+		}
+		if durationMs > 0 {
+			database.InsertMetric("srum_app_duration_ms", durationMs, labels)
+		}
+	}
+	return nil
+}
 
 const (
 	srumDbPath           = "C:\\Windows\\System32\\sru\\SRUDB.dat"
@@ -200,11 +271,12 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 		return fmt.Errorf("failed to read ESE catalog: %w", err)
 	}
 
-	// 4. Read SrumIdMapTable: Id (Int32) -> Value (String, the App Name)
-	idMap := make(map[int32]string)
+	// 4. Read SrumIdMapTable: split into app map (IdType=0) and user map (IdType=1)
+	appIdMap := make(map[int32]string)  // appId  → app path
+	userIdMap := make(map[int32]string) // userId → SID string
 
 	firstRowPrinted := false
-	err = catalog.DumpTable(srumIdMapTable, func(row *ordereddict.Dict) error {
+	parseSrumIdMap := func(row *ordereddict.Dict) error {
 		if !firstRowPrinted {
 			fmt.Printf("srum debug map keys: %v\n", row.Keys())
 			firstRowPrinted = true
@@ -218,80 +290,88 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 			return nil
 		}
 
+		idType, _ := getInt32FromDict(row, "IdType")
+
 		valStr, ok := row.Get("IdBlob")
 		if !ok {
 			valStr, ok = row.Get("Value")
 		}
 		if ok {
 			if s, ok := valStr.(string); ok {
-				idMap[idVal] = s
+				name := decodeUTF16HexString(s)
+				switch idType {
+				case 1: // User SID
+					userIdMap[idVal] = name
+				default: // 0 = App path
+					appIdMap[idVal] = sanitizeAppName(name)
+				}
 			}
 		}
 		return nil
-	})
+	}
+
+	err = catalog.DumpTable(srumIdMapTable, parseSrumIdMap)
 
 	if err != nil {
 		fmt.Printf("srum warning: %s not found, trying fallback %s\n", srumIdMapTable, srumIdMapTableAlt)
-		// Try alternative table name
-		err = catalog.DumpTable(srumIdMapTableAlt, func(row *ordereddict.Dict) error {
-			idVal, ok := getInt32FromDict(row, "IdIndex")
-			if !ok {
-				idVal, ok = getInt32FromDict(row, "Id")
-			}
-			if !ok {
-				return nil
-			}
-
-			valStr, ok := row.Get("IdBlob")
-			if !ok {
-				valStr, ok = row.Get("Value")
-			}
-			if ok {
-				if s, ok := valStr.(string); ok {
-					idMap[idVal] = s
-				}
-			}
-			return nil
-		})
+		err = catalog.DumpTable(srumIdMapTableAlt, parseSrumIdMap)
 		if err != nil {
 			fmt.Printf("srum warning: both %s and fallback %s not found in catalog\n", srumIdMapTable, srumIdMapTableAlt)
 		}
 	}
-	fmt.Printf("srum debug: successfully mapped %d application IDs\n", len(idMap))
+	fmt.Printf("srum debug: mapped %d app IDs, %d user IDs\n", len(appIdMap), len(userIdMap))
 
 	// 5. Read Application Resource Usage Table
-	// Limit processing to recent entries or just top consumers to avoid heavy load
 	metricsInserted := 0
 	count := 0
 	err = catalog.DumpTable(srumAppResourceTable, func(row *ordereddict.Dict) error {
 		count++
-		if count > 5000 { // Increased limit for safety
-			return io.EOF // Stop iteration
+		if count > 5000 {
+			return io.EOF
 		}
 
-		// Extract fields
 		appId, ok := getInt32FromDict(row, "AppId")
 		if !ok {
 			return nil
 		}
 
-		cycleTime, _ := getInt64FromDict(row, "CycleTime")
-		bytesRead, _ := getInt64FromDict(row, "BytesRead")
-		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
-
-		appName, exists := idMap[appId]
+		appName, exists := appIdMap[appId]
 		if !exists || appName == "" {
 			return nil
 		}
 
-		labels := map[string]string{
-			"app_name": appName,
+		// Resolve user name
+		userName := "unknown"
+		if userId, ok := getInt32FromDict(row, "UserId"); ok {
+			if sid, hasSid := userIdMap[userId]; hasSid && sid != "" {
+				userName = sidToUsername(sid)
+			}
 		}
 
-		// These are accumulating counters in SRUM, so we just report current total
+		cycleTime, _ := getInt64FromDict(row, "CycleTime")
+		fgCycleTime, _ := getInt64FromDict(row, "ForegroundCycleTime")
+		bgCycleTime, _ := getInt64FromDict(row, "BackgroundCycleTime")
+		bytesRead, _ := getInt64FromDict(row, "BytesRead")
+		bytesWritten, _ := getInt64FromDict(row, "BytesWritten")
+		durationMs, _ := getInt64FromDict(row, "DurationMS")
+
+		labels := map[string]string{
+			"app_name":  appName,
+			"user_name": userName,
+		}
+
 		database.InsertMetric("srum_app_cycle_time_total", float64(cycleTime), labels)
 		database.InsertMetric("srum_app_bytes_read_total", float64(bytesRead), labels)
 		database.InsertMetric("srum_app_bytes_written_total", float64(bytesWritten), labels)
+		if fgCycleTime > 0 {
+			database.InsertMetric("srum_app_foreground_cycle_time_total", float64(fgCycleTime), labels)
+		}
+		if bgCycleTime > 0 {
+			database.InsertMetric("srum_app_background_cycle_time_total", float64(bgCycleTime), labels)
+		}
+		if durationMs > 0 {
+			database.InsertMetric("srum_app_duration_ms", float64(durationMs), labels)
+		}
 		metricsInserted++
 		return nil
 	})
@@ -305,7 +385,82 @@ func CollectSrumHistoricalMetrics(database *db.VictoriaDB) (err error) {
 	return nil
 }
 
-// copyFile is a helper to copy a file
+// sidToUsername resolves a Windows SID string (e.g. "S-1-5-21-...") to a
+// human-readable account name using LookupAccountSid.
+func sidToUsername(sidStr string) string {
+	sid, err := windows.StringToSid(sidStr)
+	if err != nil {
+		// SID string might actually be a decoded blob that isn't a proper SID;
+		// return the raw string trimmed of garbage.
+		return strings.TrimSpace(sidStr)
+	}
+	account, domain, _, err := sid.LookupAccount("")
+	if err != nil {
+		return sidStr
+	}
+	if domain != "" {
+		return domain + "\\" + account
+	}
+	return account
+}
+
+// decodeUTF16HexString converts a hex-encoded UTF-16LE string (as returned by
+// go-ese for Long Binary columns in SRUDB.dat) to a regular UTF-8 Go string.
+// If the input is not valid hex or UTF-16LE, the raw input is returned as-is.
+func decodeUTF16HexString(s string) string {
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) < 2 {
+		return s // not hex-encoded, return raw
+	}
+	// Interpret as little-endian UTF-16 pairs
+	u16 := make([]uint16, len(b)/2)
+	for i := range u16 {
+		u16[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+	}
+	// Trim null terminators
+	for len(u16) > 0 && u16[len(u16)-1] == 0 {
+		u16 = u16[:len(u16)-1]
+	}
+	if len(u16) == 0 {
+		return s
+	}
+	return string(utf16.Decode(u16))
+}
+
+// sanitizeAppName cleans up an app name decoded from SRUM, stripping null bytes
+// and normalising device paths to use forward slashes so they are safe as
+// VictoriaMetrics label values.  Returns "" for obviously corrupted entries.
+func sanitizeAppName(name string) string {
+	name = strings.TrimSpace(name)
+	// Strip embedded null bytes that remain after UTF-16 decoding
+	name = strings.ReplaceAll(name, "\x00", "")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+
+	// Reject entries containing non-printable / binary garbage characters.
+	// Valid app names consist of printable ASCII + common Unicode path chars.
+	for _, r := range name {
+		if r < 0x20 && r != 0x09 { // control chars except tab
+			return ""
+		}
+	}
+
+	// Normalise Windows device paths: replace backslashes with forward slashes.
+	if strings.HasPrefix(name, `\`) {
+		name = strings.ReplaceAll(name, `\`, "/")
+	}
+
+	// Reject suspiciously short device paths that are clearly truncated
+	// (e.g. "/Device/" or "/Device/Har").
+	if strings.HasPrefix(name, "/Device/") && len(name) < 20 {
+		return ""
+	}
+
+	return name
+}
+
 func copyFile(src, dst string) error {
 	sourceFile, err := os.Open(src)
 	if err != nil {

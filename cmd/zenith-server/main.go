@@ -266,16 +266,28 @@ func startScheduler(database *db.VictoriaDB, intervalStr string) {
 		interval = 5 * time.Minute
 	}
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	// Regular 5-minute ticker: logs, CPU, memory, process, network
+	regularTicker := time.NewTicker(interval)
+	defer regularTicker.Stop()
 
-	// Run immediately on startup
+	// SRUM ticker: Windows only flushes SRUM every hour, so no point polling faster
+	srumTicker := time.NewTicker(60 * time.Minute)
+	defer srumTicker.Stop()
+
+	// Run both immediately on startup
 	log.Println("Running initial collection...")
 	runCollection(database, intervalStr)
+	go runSRUMCollection(database)
 
-	for range ticker.C {
-		log.Println("Running scheduled collection...")
-		runCollection(database, intervalStr)
+	for {
+		select {
+		case <-regularTicker.C:
+			log.Println("Running scheduled collection...")
+			runCollection(database, intervalStr)
+		case <-srumTicker.C:
+			log.Println("Running scheduled SRUM collection...")
+			runSRUMCollection(database)
+		}
 	}
 }
 
@@ -290,6 +302,13 @@ func runCollection(database *db.VictoriaDB, duration string) {
 		log.Printf("Error collecting process metrics: %v", err)
 	}
 	log.Println("Finished collection.")
+}
+
+func runSRUMCollection(database *db.VictoriaDB) {
+	if err := collector.CollectSrumHistoricalMetrics(database); err != nil {
+		log.Printf("Error collecting SRUM historical metrics: %v", err)
+	}
+	log.Println("Finished SRUM collection.")
 }
 
 func handleQuery(w http.ResponseWriter, r *http.Request, database *db.VictoriaDB, client llm.Provider, rlDB *rl.DB) {

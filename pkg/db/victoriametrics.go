@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -35,15 +36,25 @@ func NewVictoriaDB(metricsURL, logsURL string) *VictoriaDB {
 }
 
 func (v *VictoriaDB) InsertMetric(name string, value float64, labels map[string]string) error {
-	// Use Influx line protocol format for simplicity
-	// measurement,tag1=val1,tag2=val2 value=123.45 timestamp
-	line := fmt.Sprintf("%s", name)
-	for k, val := range labels {
-		line += fmt.Sprintf(",%s=%s", k, val)
-	}
-	line += fmt.Sprintf(" value=%f %d\n", value, time.Now().UnixNano())
+	// Use Prometheus exposition format via /api/v1/import/prometheus.
+	// This stores the metric with exactly the name given, no suffix or doubling.
+	// Format: metric_name{label1="val1",label2="val2"} value timestamp_ms
 
-	resp, err := v.Client.Post(v.MetricsURL+"/write", "text/plain", bytes.NewBufferString(line))
+	var labelParts []string
+	for k, val := range labels {
+		// Escape backslashes and double-quotes inside label values
+		escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(val)
+		labelParts = append(labelParts, fmt.Sprintf(`%s="%s"`, k, escaped))
+	}
+
+	var line string
+	if len(labelParts) > 0 {
+		line = fmt.Sprintf("%s{%s} %f %d\n", name, strings.Join(labelParts, ","), value, time.Now().UnixMilli())
+	} else {
+		line = fmt.Sprintf("%s %f %d\n", name, value, time.Now().UnixMilli())
+	}
+
+	resp, err := v.Client.Post(v.MetricsURL+"/api/v1/import/prometheus", "text/plain", bytes.NewBufferString(line))
 	if err != nil {
 		return err
 	}
@@ -64,6 +75,10 @@ func (v *VictoriaDB) QueryMetrics(query string) (string, error) {
 	}
 	q := u.Query()
 	q.Set("query", query)
+	// step=4200 extends the lookback window to 70 minutes so metrics written
+	// every 5 minutes (CPU/memory) and SRUM data written hourly are both
+	// always found between collection cycles.
+	q.Set("step", "4200")
 	u.RawQuery = q.Encode()
 
 	resp, err := v.Client.Get(u.String())
@@ -92,10 +107,31 @@ func (v *VictoriaDB) QueryMetrics(query string) (string, error) {
 		return "", err
 	}
 
-	// Simple serialization for LLM
+	// Format results in a clean, LLM-readable way
 	var out bytes.Buffer
 	for _, res := range result.Data.Result {
-		fmt.Fprintf(&out, "Metric: %v, Value: %v\n", res.Metric, res.Value)
+		// Extract the numeric value (index 1 of the [timestamp, value] pair)
+		val := ""
+		if len(res.Value) >= 2 {
+			val = fmt.Sprintf("%v", res.Value[1])
+		}
+
+		// Build a label description; omit __name__ since we print query context elsewhere
+		var labelParts []string
+		for k, v := range res.Metric {
+			if k != "__name__" {
+				labelParts = append(labelParts, fmt.Sprintf("%s=%q", k, v))
+			}
+		}
+		name := res.Metric["__name__"]
+		if name == "" {
+			name = "result"
+		}
+		if len(labelParts) > 0 {
+			fmt.Fprintf(&out, "%s{%s}: %s\n", name, strings.Join(labelParts, ", "), val)
+		} else {
+			fmt.Fprintf(&out, "%s: %s\n", name, val)
+		}
 	}
 
 	return out.String(), nil

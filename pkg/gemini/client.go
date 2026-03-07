@@ -52,29 +52,29 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	prompt := fmt.Sprintf("Based on the following user query, provide ONLY ONE database query prefixed with 'METRIC:' or 'LOG:'.\n\n"+
 		"Metrics (VictoriaMetrics - MetricsQL):\n"+
-		"- cpu_usage_pct (labels: host)\n"+
-		"- memory_used_mb (labels: host)\n"+
-		"- process_cpu_pct (labels: pid, process_name)\n"+
-		"- process_memory_mb (labels: pid, process_name)\n"+
-		"- srum_network_bytes_sent_total (labels: interface)\n"+
-		"- srum_network_bytes_received_total (labels: interface)\n"+
-		"- srum_app_cycle_time_total (labels: app_name)\n"+
-		"- srum_app_bytes_read_total (labels: app_name)\n"+
-		"- srum_app_bytes_written_total (labels: app_name)\n\n"+
+		"- System-wide (NO label filter needed): cpu_usage_pct, memory_used_mb\n"+
+		"- Per-process (use label `process_name`): process_cpu_pct, process_memory_mb\n"+
+		"- SRUM app (use labels `app_name`, `user_name`): srum_app_cycle_time_total, srum_app_bytes_read_total, srum_app_bytes_written_total, srum_app_duration_ms, srum_app_foreground_cycle_time_total, srum_app_background_cycle_time_total\n"+
+		"- SRUM network (NO label needed): srum_network_bytes_sent_total, srum_network_bytes_received_total\n\n"+
 		"Logs (VictoriaLogs - LogsQL):\n"+
 		"- Fields: processName, subsystem, category, messageType, eventMessage\n"+
-		"- Syntaxes: `field:value`, `field:\"exact string\"`, `field:~\"regex\"` \n"+
-		"- Example LogsQL: `eventMessage:\"error\"`, `processName:\"wifid\"` \n\n"+
+		"- Syntax: `field:value` or `field:\"exact string\"`\n\n"+
 		"Rules:\n"+
-		"1. Return ONLY ONE line. Multi-line responses will fail.\n"+
-		"2. NEVER combine metrics and logs in the same query. Choose ONE.\n"+
-		"3. SRUM data (network, disk, cycle time) is exclusively stored as METRICS, never as LOGS.\n"+
-		"4. NEVER compare metrics to strings (e.g. `metric == \"\"`). To check for existence, simply query the metric name (e.g., `srum_app_bytes_read_total > 0`).\n"+
-		"5. For SRUM app metrics, use the label `app_name`.\n"+
-		"6. LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n"+
-		"7. LogsQL uses `AND`/`OR` for logic, NEVER `,` or `|`.\n"+
-		"8. For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n"+
-		"Example MetricsQL: `METRIC:avg(cpu_usage_pct)`, `METRIC:srum_network_bytes_sent_total > 0`\n"+
+		"1. Return ONLY ONE line. Do NOT truncate metric names.\n"+
+		"2. NEVER add a label filter unless the user asks about a specific app or process.\n"+
+		"3. NEVER use placeholder label values like 'your_process_name'. Omit the label entirely.\n"+
+		"4. NEVER combine metrics and logs in the same query. Choose ONE.\n"+
+		"5. SRUM data is exclusively METRICS, never LOGS.\n"+
+		"6. NEVER compare metrics to strings. To check for existence, use `metric_name > 0`.\n"+
+		"7. MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
+		"8. LogsQL uses `:` for equality (NEVER `=` or `==`) and uppercase `AND`/`OR`.\n"+
+		"9. For arithmetic, do NOT repeat the prefix.\n\n"+
+		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
+		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
+		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+
+		"Example 'Any SRUM data': `METRIC:srum_app_bytes_read_total > 0`\n"+
+		"Example 'Most disk IO apps': `METRIC:topk(10, srum_app_bytes_written_total)`\n"+
+		"Example 'Most CPU apps (SRUM)': `METRIC:topk(10, srum_app_cycle_time_total)`\n"+
 		"Example LogsQL: `LOG:eventMessage:\"error\" AND processName:\"wifid\"`\n\n"+
 		"Query: %s\n\nResponse:", userQuery)
 
@@ -157,10 +157,11 @@ func cleanSQL(s string) string {
 func (c *Client) ExplainResults(userQuery, sql, results string) (string, error) {
 	prompt := fmt.Sprintf("Analyze the database results below to answer the user's question.\n\n"+
 		"Rules:\n"+
-		"1. If the results are 'NO_DATA_FOUND' or empty, you MUST say 'No data found for this query'.\n"+
-		"2. Do NOT invent application names, process IDs, or numerical values.\n"+
-		"3. Do NOT use placeholder names like 'Application X' or 'Process 123'.\n"+
-		"4. Be extremely concise and focus ONLY on the data provided.\n\n"+
+		"1. If the results are 'NO_DATA_FOUND' or empty, say 'No data found for this query'.\n"+
+		"2. If results contain metrics with value 0, explain that those apps/processes showed no activity for that metric - do NOT say 'no data found'.\n"+
+		"3. Do NOT invent application names, process IDs, or numerical values.\n"+
+		"4. Do NOT use placeholder names like 'Application X' or 'Process 123'.\n"+
+		"5. Be extremely concise. If all values are 0, say so clearly.\n\n"+
 		"User Query: %s\n"+
 		"SQL/Query Executed: %s\n"+
 		"Database Results: %s\n\n"+
