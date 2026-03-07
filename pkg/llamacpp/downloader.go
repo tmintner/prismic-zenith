@@ -96,8 +96,8 @@ func DownloadModel(url, destPath string) error {
 	return nil
 }
 
-// DefaultModelURL is the HuggingFace URL for the default model (Phi-4-mini)
-const DefaultModelURL = "https://huggingface.co/unsloth/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-Q4_K_M.gguf"
+// DefaultModelURL is the HuggingFace URL for the default model (Qwen2.5-Coder-7B-Instruct)
+const DefaultModelURL = "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf"
 
 // EnsureModel checks if the model exists at localModelPath.
 // If not, it downloads the default model to that path.
@@ -107,6 +107,6 @@ func EnsureModel(localModelPath string) error {
 		return nil // Extant
 	}
 
-	log.Printf("Model missing: auto-downloading default Phi-4-mini GGUF...")
+	log.Printf("Model missing: auto-downloading default Qwen2.5-Coder-7B GGUF...")
 	return DownloadModel(DefaultModelURL, localModelPath)
 }
