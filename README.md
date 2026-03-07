@@ -58,7 +58,7 @@ Create a `config.json` in the root directory. You can use `config.json.example` 
     "llm_provider": "llamacpp",
     "ollama_model": "qwen2.5-coder:7b",
     "llamacpp_host": "localhost",
-    "llamacpp_port": 8080,
+    "llamacpp_port": 8081,
     "llamacpp_bin": "llama-server",
     "llamacpp_model": "./models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
     "collect_interval": "5m",

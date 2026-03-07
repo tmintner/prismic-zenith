@@ -196,6 +196,15 @@ func (v *VictoriaDB) QueryLogs(query string) (string, error) {
 		return "", err
 	}
 	q := u.Query()
+
+	// VictoriaLogs defaults to the last 5 minutes if no time filter is provided.
+	// Since we actively strip LLM time filters, we must append a solid 24h default.
+	if query != "" && query != "*" {
+		query = fmt.Sprintf("(%s) AND _time:24h", query)
+	} else {
+		query = "_time:24h"
+	}
+
 	q.Set("query", query)
 	u.RawQuery = q.Encode()
 

@@ -89,7 +89,7 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 	systemPrompt := "You are Zenith, an AI expert in system performance. " +
 		"You have access to two databases:\n" +
 		"1. VictoriaMetrics (Metrics): Query using MetricsQL (PromQL-compatible). Metrics: 'cpu_usage_pct', 'memory_used_mb', 'process_cpu_pct', 'process_memory_mb', 'srum_network_bytes_sent_total', 'srum_network_bytes_received_total', 'srum_app_cycle_time_total', 'srum_app_bytes_read_total', 'srum_app_bytes_written_total'.\n" +
-		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage. NEVER use square brackets `[]` in LogsQL filters.\n\n" +
+		"2. VictoriaLogs (Logs): Query using LogsQL (Syntax: `field:value`). Fields: processName, subsystem, category, messageType, eventMessage. NEVER use square brackets `[]`, NEVER use comparison operators like `>`, `<`, `>=`, `<=`, and NEVER use time filters (e.g., `timestamp`, `now`, `-1d`) in LogsQL filters.\n\n" +
 		"Based on the user query, provide EXACTLY ONE database query prefixed with 'METRIC:' or 'LOG:'. Do NOT include explanation or markdown.\n\n" +
 		"Rules for Queries:\n" +
 		"- Return ONLY ONE line. Multi-line responses will fail.\n" +
@@ -98,7 +98,10 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- For SRUM app metrics, use the label `app_name`.\n" +
 		"- For process metrics, use the label `process_name`.\n" +
 		"- MetricsQL regex uses `=~`, e.g., `process_memory_mb{process_name=~\"(?i)ollama\"}`.\n" +
+		"- MetricsQL NEVER uses SQL syntax like `ORDER BY` or `LIMIT`. To rank results, use `topk(n, metric)`.\n" +
 		"- LogsQL uses `:` for equality, NEVER `=`, `==`, or `~` (e.g. `processName:\"wifid\"`).\n" +
+		"- LogsQL NEVER uses comparison operators like `>`, `<`, `>=`, `<=`. Use `:` for all filters.\n" +
+		"- LogsQL NEVER uses time-related keywords (e.g., `timestamp`, `@timestamp`, `now`, `24h`, `1d`).\n" +
 		"- LogsQL uses `AND`/`OR` for logic, NEVER `,` or `|`.\n" +
 		"- NEVER use square brackets `[]` for filters or grouping in LogsQL.\n" +
 		"- For arithmetic, do NOT repeat the prefix, e.g., `METRIC:sum(m1) + sum(m2)`.\n\n" +
@@ -206,6 +209,32 @@ func cleanSQL(s string) string {
 	reLog := strings.NewReplacer("LOG:", "", "log:", "", "Log:", "")
 	res = reMetric.Replace(res)
 	res = reLog.Replace(res)
+	res = strings.TrimSpace(res)
+
+	// 4. Strip any leading/trailing square brackets hallucinated by the LLM
+	res = strings.TrimSpace(res)
+	if strings.HasPrefix(res, "[") && strings.HasSuffix(res, "]") {
+		res = res[1 : len(res)-1]
+	}
+	res = strings.TrimSpace(res)
+
+	// 5. Strip any hallucinated time filters (e.g., AND timestamp > now - 24h)
+	if hasLog {
+		timeFilters := []string{
+			"AND timestamp", "AND @timestamp", "AND _time",
+			"timestamp:", "@timestamp:", "_time:",
+		}
+		for _, tf := range timeFilters {
+			if idx := strings.Index(strings.ToUpper(res), tf); idx != -1 {
+				res = res[:idx]
+				break
+			}
+		}
+		// Also catch trailing comparisons if the word "timestamp" was missed
+		if idx := strings.Index(res, " > "); idx != -1 {
+			res = res[:idx]
+		}
+	}
 	res = strings.TrimSpace(res)
 
 	if hasLog {

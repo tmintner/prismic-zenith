@@ -35,7 +35,7 @@ func NewClient(ctx context.Context, apiKey string) (*Client, error) {
 				"Query this using MetricsQL (PromQL-compatible).\n" +
 				"2. VictoriaLogs (Logs): Use this for event logs (Windows Event Log, console messages). " +
 				"Query using LogsQL (Syntax: `field:value` or `field:\"value\"`). Fields: 'processName', 'subsystem', 'category', 'messageType', 'eventMessage'. " +
-				"NEVER use square brackets `[]` in LogsQL filters.\n\n" +
+				"NEVER use square brackets `[]`, NEVER use comparison operators like `>`, `<`, `>=`, `<=`, and NEVER use time filters (e.g., `timestamp`, `now`, `-1d`) in LogsQL filters. All time filtering is handled by the server.\n\n" +
 				"Your goal is to translate natural language questions into EXACTLY ONE appropriate query, " +
 				"prefixed with either 'METRIC:' or 'LOG:'. " +
 				"Do NOT return multiple lines or multiple queries. " +
@@ -68,9 +68,12 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"5. SRUM data is exclusively METRICS, never LOGS.\n"+
 		"6. NEVER compare metrics to strings. To check for existence, use `metric_name > 0`.\n"+
 		"7. MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
-		"8. LogsQL uses `:` for equality (NEVER `=` or `==`) and uppercase `AND`/`OR`.\n"+
-		"9. NEVER use square brackets `[]` for filters or grouping in LogsQL.\n"+
-		"10. For arithmetic, do NOT repeat the prefix.\n\n"+
+		"8. MetricsQL NEVER uses SQL syntax like `ORDER BY` or `LIMIT`. To rank results, use `topk(n, metric)`.\n"+
+		"9. LogsQL uses `:` for equality (NEVER `=` or `==`).\n"+
+		"10. LogsQL NEVER uses comparison operators like `>`, `<`, `>=`, `<=`. Use `:` for all filters.\n"+
+		"11. LogsQL NEVER uses time-related keywords in the query string (e.g., `timestamp`, `@timestamp`, `now`, `24h`, `1d`).\n"+
+		"12. NEVER use square brackets `[]` for filters or grouping in LogsQL.\n"+
+		"13. For arithmetic, do NOT repeat the prefix.\n\n"+
 		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
 		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
 		"Example 'Process CPU': `METRIC:topk(5, process_cpu_pct)`\n"+
@@ -148,6 +151,32 @@ func cleanSQL(s string) string {
 	reLog := strings.NewReplacer("LOG:", "", "log:", "", "Log:", "")
 	res = reMetric.Replace(res)
 	res = reLog.Replace(res)
+	res = strings.TrimSpace(res)
+
+	// 4. Strip any leading/trailing square brackets hallucinated by the LLM
+	res = strings.TrimSpace(res)
+	if strings.HasPrefix(res, "[") && strings.HasSuffix(res, "]") {
+		res = res[1 : len(res)-1]
+	}
+	res = strings.TrimSpace(res)
+
+	// 5. Strip any hallucinated time filters (e.g., AND timestamp > now - 24h)
+	if hasLog {
+		timeFilters := []string{
+			"AND timestamp", "AND @timestamp", "AND _time",
+			"timestamp:", "@timestamp:", "_time:",
+		}
+		for _, tf := range timeFilters {
+			if idx := strings.Index(strings.ToUpper(res), tf); idx != -1 {
+				res = res[:idx]
+				break
+			}
+		}
+		// Also catch trailing comparisons if the word "timestamp" was missed
+		if idx := strings.Index(res, " > "); idx != -1 {
+			res = res[:idx]
+		}
+	}
 	res = strings.TrimSpace(res)
 
 	if hasLog {

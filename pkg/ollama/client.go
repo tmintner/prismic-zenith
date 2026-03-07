@@ -94,8 +94,10 @@ func (c *Client) GenerateSQL(userQuery string) (string, error) {
 		"- NEVER compare metrics to strings. To check for existence, just use `metric_name > 0`.\n"+
 		"- MetricsQL regex uses `=~`, e.g., `process_cpu_pct{process_name=~\"(?i)ollama\"}`.\n"+
 		"- MetricsQL uses lowercase logical operators: `and`, `or`, `unless`.\n"+
+		"- MetricsQL NEVER uses SQL syntax like `ORDER BY` or `LIMIT`. To rank results, use `topk(n, metric)`.\n"+
 		"- LogsQL uses `:` for equality, NEVER `=` or `==`.\n"+
-		"- LogsQL uses uppercase logical operators: `AND`, `OR`.\n"+
+		"- LogsQL NEVER uses comparison operators like `>`, `<`, `>=`, `<=`. Use `:` for all filters.\n"+
+		"- LogsQL NEVER uses time-related keywords in the query string (e.g., `timestamp`, `@timestamp`, `now`, `24h`, `1d`).\n"+
 		"- NEVER use square brackets `[]` for filters or grouping in LogsQL.\n\n"+
 		"Example 'System performance': `METRIC:avg(cpu_usage_pct)`\n"+
 		"Example 'Memory': `METRIC:avg(memory_used_mb)`\n"+
@@ -208,6 +210,32 @@ func cleanSQL(s string) string {
 	reLog := strings.NewReplacer("LOG:", "", "log:", "", "Log:", "")
 	res = reMetric.Replace(res)
 	res = reLog.Replace(res)
+	res = strings.TrimSpace(res)
+
+	// 4. Strip any leading/trailing square brackets hallucinated by the LLM
+	res = strings.TrimSpace(res)
+	if strings.HasPrefix(res, "[") && strings.HasSuffix(res, "]") {
+		res = res[1 : len(res)-1]
+	}
+	res = strings.TrimSpace(res)
+
+	// 5. Strip any hallucinated time filters (e.g., AND timestamp > now - 24h)
+	if hasLog {
+		timeFilters := []string{
+			"AND timestamp", "AND @timestamp", "AND _time",
+			"timestamp:", "@timestamp:", "_time:",
+		}
+		for _, tf := range timeFilters {
+			if idx := strings.Index(strings.ToUpper(res), tf); idx != -1 {
+				res = res[:idx]
+				break
+			}
+		}
+		// Also catch trailing comparisons if the word "timestamp" was missed
+		if idx := strings.Index(res, " > "); idx != -1 {
+			res = res[:idx]
+		}
+	}
 	res = strings.TrimSpace(res)
 
 	if hasLog {

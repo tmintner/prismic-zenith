@@ -56,7 +56,7 @@ func LoadConfig(path string) (*Config, error) {
 		LLMProvider:     "llamacpp",
 		OllamaModel:     "qwen2.5-coder:7b",
 		LlamaCppHost:    "localhost",
-		LlamaCppPort:    8080,
+		LlamaCppPort:    8081,
 		LlamaCppBin:     llamaBin,
 		LlamaCppModel:   "./models/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
 		CollectInterval: "5m",

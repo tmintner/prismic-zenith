@@ -115,6 +115,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	log.Printf("Initializing LLM Provider: %s", *provider)
 	switch *provider {
 	case "gemini":
 		client, err := gemini.NewClient(ctx, *apiKey)
@@ -128,6 +129,7 @@ func main() {
 		llmProvider = ollama.NewClient(ollamaURL, *modelName)
 		log.Printf("Using Ollama Provider at %s (Model: %s)", ollamaURL, *modelName)
 	case "llamacpp":
+		log.Printf("Configured Llama.cpp Model: %s", *llamaModel)
 		// Auto-download model if missing
 		if err := llamacpp.EnsureModel(*llamaModel); err != nil {
 			log.Fatalf("failed to ensure llama model: %v", err)
@@ -135,6 +137,7 @@ func main() {
 
 		// Start llama-server process
 		llamaURL := fmt.Sprintf("http://%s:%d", cfg.LlamaCppHost, cfg.LlamaCppPort)
+		log.Printf("Starting llama-server at %s with binary %s", llamaURL, *llamaBin)
 		llamaCmd := startProcess(*llamaBin, "-m", *llamaModel, "--host", cfg.LlamaCppHost, "--port", fmt.Sprintf("%d", cfg.LlamaCppPort))
 		defer stopProcess(llamaCmd)
 

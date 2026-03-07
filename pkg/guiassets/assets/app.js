@@ -169,6 +169,12 @@ function appendMessage(type, text) {
 
   const div = document.createElement('div');
   div.className = 'msg ' + type;
+
+  // Ensure text is a string to avoid [object Object]
+  if (typeof text !== 'string') {
+    text = JSON.stringify(text);
+  }
+
   div.textContent = text;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;

@@ -167,7 +167,7 @@ func postJSON(url string, payload interface{}) map[string]interface{} {
 	result := map[string]interface{}{}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		result["error"] = err.Error()
+		result["error"] = "Serialization error: " + err.Error()
 		return result
 	}
 
@@ -180,11 +180,26 @@ func postJSON(url string, payload interface{}) map[string]interface{} {
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		result["error"] = err.Error()
+		result["error"] = "Read error: " + err.Error()
 		return result
 	}
 
-	json.Unmarshal(respBody, &result)
+	if resp.StatusCode != http.StatusOK {
+		// Try to parse error from body if it's JSON
+		var errData map[string]interface{}
+		if json.Unmarshal(respBody, &errData) == nil {
+			if errMsg, ok := errData["error"].(string); ok {
+				result["error"] = errMsg
+				return result
+			}
+		}
+		result["error"] = fmt.Sprintf("Server returned status %d: %s", resp.StatusCode, string(respBody))
+		return result
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		result["error"] = "Malformed JSON response: " + err.Error()
+	}
 	return result
 }
 
@@ -199,10 +214,24 @@ func getJSON(url string) map[string]interface{} {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		result["error"] = err.Error()
+		result["error"] = "Read error: " + err.Error()
 		return result
 	}
 
-	json.Unmarshal(body, &result)
+	if resp.StatusCode != http.StatusOK {
+		var errData map[string]interface{}
+		if json.Unmarshal(body, &errData) == nil {
+			if errMsg, ok := errData["error"].(string); ok {
+				result["error"] = errMsg
+				return result
+			}
+		}
+		result["error"] = fmt.Sprintf("Server returned status %d: %s", resp.StatusCode, string(body))
+		return result
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		result["error"] = "Malformed JSON response: " + err.Error()
+	}
 	return result
 }
